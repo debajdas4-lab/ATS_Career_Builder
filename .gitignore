@@ -1,8 +1,14 @@
-.env
 .venv/
+venv/
+.env
+.streamlit/secrets.toml
+
 __pycache__/
 *.pyc
-.streamlit/secrets.toml
-generated/
-uploads/
 
+chroma/
+chroma_db/
+*.sqlite3
+
+.vscode/
+.idea/
