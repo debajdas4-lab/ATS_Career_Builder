@@ -84,128 +84,55 @@ def generation_node(state: CareerGuideState) -> CareerGuideState:
     job = state.get("job_spec", {})
     research = state.get("research", {})
     kb = CareerKnowledgeBase(CHROMA_PERSIST_DIR)
-    evidence_context = kb.query(" ".join(job.get("keywords", [])[:10]), n_results=3)
-    # Keep the generation request comfortably below low-tier Groq TPM limits.
-    # The candidate profile, JobSpec and retrieved evidence already contain the
-    # highest-value structured information, so the raw documents are included
-    # only as compact supporting context rather than being resent in full.
-    candidate_context = json.dumps(candidate, ensure_ascii=False)[:7500]
-    resume_context = state.get("resume_text", "")[:8500]
-    job_context = json.dumps(job, ensure_ascii=False)[:5500]
-
-    # Research can contain full fetched pages. Keep only decision-useful fields
-    # and aggressively cap them before they reach the LLM.
-    compact_research = {
-        key: research.get(key)
-        for key in ("company_profile", "leadership", "strategy", "market", "sources")
-        if research.get(key)
-    }
-    research_context = json.dumps(compact_research, ensure_ascii=False)[:3500]
-
-    # ChromaDB retrieval is useful evidence, but six large chunks duplicated too
-    # much of the resume. Keep only the top three and cap the serialized context.
-    compact_evidence = evidence_context[:3] if isinstance(evidence_context, list) else evidence_context
-    evidence_text = json.dumps(compact_evidence, ensure_ascii=False)[:3000]
-
-    gaps = state.get("career_gap", {}).get("priority_gaps", [])
-    fit = state.get("job_fit", {})
-
+    evidence_context = kb.query(" ".join(job.get("keywords", [])[:12]), n_results=6)
     prompt = f"""You are an evidence-first ATS Career Guide.
 Return ONLY valid JSON with exactly these keys:
 optimized_resume, cover_letter, linkedin_optimization, naukri_optimization, interview_kit, career_roadmap.
+Never invent employers, dates, degrees, certifications, metrics, ownership, or skills.
+Use only evidence from the candidate profile/resume. Treat company research as context, not candidate evidence.
+Candidate profile:
+{json.dumps(candidate)[:18000]}
+Resume:
+{state.get('resume_text','')[:24000]}
+Job:
+{json.dumps(job)[:14000]}
+Company research:
+{json.dumps(research)[:12000]}
+Retrieved career evidence:
+{json.dumps(evidence_context)[:12000]}
 
-Rules:
-- Never invent employers, dates, degrees, certifications, metrics, ownership, or skills.
-- Candidate evidence is authoritative. Company research is context only.
-- Preserve important quantified achievements when supported by evidence.
-- Be concise: avoid repeating the same evidence across outputs.
-
-CANDIDATE PROFILE:
-{candidate_context}
-
-SELECTED RESUME EVIDENCE:
-{resume_context}
-
-TARGET JOB:
-{job_context}
-
-JOB FIT:
-{json.dumps(fit, ensure_ascii=False)[:1800]}
-
-PRIORITY GAPS:
-{json.dumps(gaps, ensure_ascii=False)[:1200]}
-
-COMPANY / MARKET CONTEXT:
-{research_context}
-
-RETRIEVED EVIDENCE:
-{evidence_text}
-
-Output requirements:
-- interview_kit: resume_questions, company_questions, leadership_questions, technical_or_domain_questions, gap_questions.
-- career_roadmap: 30_days, 60_days, 90_days, longer_term.
-- linkedin_optimization and naukri_optimization: headline, about_or_summary, skills, keywords, changes.
+For interview_kit return JSON containing 5 sections: resume_questions, company_questions, leadership_questions, technical_or_domain_questions, gap_questions.
+For career_roadmap return 30_days, 60_days, 90_days and longer_term.
+For LinkedIn/Naukri optimization return headline, about_or_summary, skills, keywords, and changes.
 """
     response = llm.invoke(prompt)
     raw = response.content if isinstance(response.content, str) else str(response.content)
-    payload = parse_json(raw)
-
-    warnings: list[str] = []
-
-    # A long multi-artifact response can occasionally be truncated or malformed.
-    # Retry once with a smaller recovery prompt instead of silently returning
-    # empty Resume/Cover Letter/Profile/Roadmap outputs.
-    if not payload or not str(payload.get("optimized_resume", "")).strip():
-        recovery_prompt = f"""Return ONLY one valid JSON object. No markdown fences and no commentary.
-Required keys:
-optimized_resume, cover_letter, linkedin_optimization, naukri_optimization, interview_kit, career_roadmap.
-
-Use only the evidence below. Never invent employers, dates, degrees, certifications, metrics, ownership, or skills.
-Keep the optimized resume concise but complete. Keep all other outputs concise.
-
-CANDIDATE:
-{candidate_context[:5000]}
-
-RESUME EVIDENCE:
-{resume_context[:6000]}
-
-TARGET JOB:
-{job_context[:3500]}
-
-PRIORITY GAPS:
-{json.dumps(gaps, ensure_ascii=False)[:800]}
-
-COMPANY CONTEXT:
-{research_context[:1500]}
+    payload = parse_json(raw) or {}
+    if not payload.get("cover_letter") and not DEMO_MODE:
+        cover_prompt = f"""Write a concise professional cover letter for the target role using only the candidate evidence below.
+Do not invent employers, dates, metrics, ownership or skills. Return plain text only; no JSON, Markdown headings, bullets, **, ## or --- separators.
+Candidate:
+{candidate_context[:3500]}
+Target Job:
+{job_context[:3000]}
+Job Gaps:
+{json.dumps(gaps, ensure_ascii=False)[:700]}
 """
-        recovery_response = llm.invoke(recovery_prompt)
-        recovery_raw = (
-            recovery_response.content
-            if isinstance(recovery_response.content, str)
-            else str(recovery_response.content)
-        )
-        recovered = parse_json(recovery_raw)
-        if recovered:
-            payload = recovered
-            warnings.append(
-                "The first generation response was incomplete; the Career Guide automatically regenerated a compact valid result."
-            )
-        else:
-            payload = {}
-            warnings.append(
-                "The AI response could not be parsed into the required structured output. Retry the analysis with shorter profile/research inputs."
-            )
+        try:
+            cover_response = llm.invoke(cover_prompt)
+            cover_text = cover_response.content if isinstance(cover_response.content, str) else str(cover_response.content)
+            payload["cover_letter"] = cover_text.strip()
+        except Exception:
+            warnings.append("Cover letter generation was unavailable for this run.")
 
     optimized = str(payload.get("optimized_resume", "")).strip()
-    guard = evidence_guard(optimized, candidate) if optimized else {"pass": True}
+    guard = evidence_guard(optimized, candidate)
+    warnings = []
     if not guard["pass"]:
-        warnings.append(
-            "Evidence guard flagged unsupported numeric claims in the generated resume. Review before use."
-        )
-
+        warnings.append("Evidence guard flagged unsupported numeric claims in the generated resume. Review before use.")
     return {
         "optimized_resume": optimized,
-        "cover_letter": str(payload.get("cover_letter", "")).strip(),
+        "cover_letter": str(payload.get("cover_letter", "")),
         "linkedin_optimization": payload.get("linkedin_optimization", {}),
         "naukri_optimization": payload.get("naukri_optimization", {}),
         "interview_kit": payload.get("interview_kit", {}),
@@ -242,28 +169,20 @@ def demo_generation(state: CareerGuideState) -> CareerGuideState:
 
 
 def parse_json(raw: str) -> dict[str, Any] | None:
-    """Parse a model JSON object while tolerating markdown/prose wrappers."""
     text = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.I)
-    text = re.sub(r"\s*```$", "", text).strip()
-
+    text = re.sub(r"\s*```$", "", text)
     try:
         value = json.loads(text)
         return value if isinstance(value, dict) else None
     except json.JSONDecodeError:
-        pass
-
-    # Extract the largest complete-looking JSON object from surrounding prose.
-    start = text.find("{")
-    end = text.rfind("}")
-    if start >= 0 and end > start:
-        candidate = text[start:end + 1]
-        try:
-            value = json.loads(candidate)
-            return value if isinstance(value, dict) else None
-        except json.JSONDecodeError:
-            return None
-
-    return None
+        start, end = text.find("{"), text.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                value = json.loads(text[start:end + 1])
+                return value if isinstance(value, dict) else None
+            except json.JSONDecodeError:
+                return None
+        return None
 
 
 def build_career_graph():
