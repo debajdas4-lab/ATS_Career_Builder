@@ -812,7 +812,7 @@ if st.button("🚀 Analyze job & build career guide", type="primary", use_contai
 
     try:
         response = httpx.post(
-            f"{API_URL}{career_guide_path}",
+            f"{API_URL}/v3/career-guide",
             files={"resume": (resume_file.name, resume_file.getvalue(), resume_file.type)},
             data={
                 "job_description": jd_text,
