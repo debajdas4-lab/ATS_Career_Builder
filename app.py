@@ -184,6 +184,52 @@ def render_research_sources(sources):
                 st.markdown(f"- {label}")
 
 
+
+def build_ui_linkedin_fallback(result: dict) -> dict:
+    profile = result.get("candidate_profile") or {}
+    job = result.get("job_spec") or {}
+    return {
+        "headline": str(profile.get("headline") or "Technical Program & Transformation Leader"),
+        "about_or_summary": str(profile.get("summary") or profile.get("professional_summary") or "Experienced technology and transformation leader focused on complex cross-functional programs and measurable outcomes."),
+        "skills": [str(x) for x in (job.get("keywords") or [])[:15] if str(x).strip()],
+        "keywords": [str(x) for x in (job.get("keywords") or [])[:15] if str(x).strip()],
+        "changes": [
+            "Align the headline to the target role using only evidenced experience.",
+            "Prioritize the strongest program, technical and leadership evidence from the resume.",
+        ],
+    }
+
+
+def render_research_package(research: dict):
+    profile = parse_possible_json(research.get("company_profile", {}))
+    if isinstance(profile, dict):
+        if profile.get("name"):
+            st.markdown(f"### {html.escape(str(profile.get('name')))}")
+        if profile.get("overview"):
+            st.write(profile.get("overview"))
+
+    signals = list(dict.fromkeys([*(research.get("strategy") or []), *(research.get("market_signals") or [])]))
+    if signals:
+        st.subheader("Business & Strategic Signals")
+        for item in signals:
+            st.markdown(f"- {str(item).replace('_', ' ').title()}")
+
+    if research.get("leadership"):
+        st.subheader("Leadership Context")
+        render_structured_content(research.get("leadership"))
+
+    if research.get("competitors"):
+        st.subheader("Market Context")
+        st.write(", ".join(map(str, research.get("competitors", []))))
+
+    if research.get("sources"):
+        st.subheader("Research Sources")
+        render_research_sources(research.get("sources"))
+
+    if research.get("research_warning"):
+        st.caption(str(research.get("research_warning")))
+
+
 def render_profile_content(value, title):
     value = parse_possible_json(value)
     st.subheader(title)
@@ -1003,7 +1049,11 @@ if result:
             st.write(fallback_cover)
 
     with tabs[2]:
-        render_structured_content(result.get("linkedin_optimization", {}), "No LinkedIn optimization was generated.")
+        linkedin = result.get("linkedin_optimization")
+        if not isinstance(linkedin, dict) or not linkedin:
+            linkedin = build_ui_linkedin_fallback(result)
+            st.info("The V3 response did not include a structured LinkedIn artifact, so an evidence-based fallback is shown.")
+        render_profile_content(linkedin, "LinkedIn Optimization")
 
     with tabs[3]:
         render_structured_content(result.get("naukri_optimization", {}), "No Naukri optimization was generated.")
@@ -1034,25 +1084,12 @@ if result:
         research = result.get("research") or {}
         st.subheader("Company & Market Intelligence")
         company_supplied = bool(company_url.strip())
-        if research:
-            profile = parse_possible_json(research.get("company_profile", {}))
-            if isinstance(profile, dict):
-                if profile.get("name"):
-                    st.markdown(f"### {profile.get('name')}")
-                if profile.get("overview"):
-                    st.write(profile.get("overview"))
-            signals = list(dict.fromkeys([*(research.get("strategy") or []), *(research.get("market_signals") or [])]))
-            if signals:
-                st.subheader("Business & Strategic Signals")
-                for item in signals:
-                    st.markdown(f"- {str(item).replace('_', ' ').title()}")
-            if research.get("leadership"):
-                st.subheader("Leadership Context")
-                render_structured_content(research.get("leadership"))
-            if research.get("sources"):
-                st.subheader("Research Sources")
-                render_research_sources(research.get("sources"))
-        elif company_supplied:
+        research_requested = bool(company_url.strip() or leadership_url.strip() or market_urls.strip() or market_query.strip())
+
+        if isinstance(research, dict) and (research.get("company_profile") or research.get("sources") or research.get("leadership") or research.get("market_signals")):
+            render_research_package(research)
+        elif research_requested:
+            retry = {}
             try:
                 r = httpx.post(
                     f"{API_URL}/v3/research",
@@ -1065,30 +1102,17 @@ if result:
                     timeout=45,
                 )
                 r.raise_for_status()
-                retry = r.json().get("research") or {}
-            except Exception:
-                retry = {}
+                payload = r.json()
+                retry = payload.get("research") or {}
+            except Exception as exc:
+                st.warning(f"Research fallback request failed: {type(exc).__name__}: {exc}")
 
-            if retry:
-                profile = parse_possible_json(retry.get("company_profile", {}))
-                if isinstance(profile, dict):
-                    if profile.get("name"):
-                        st.markdown(f"### {profile.get('name')}")
-                    if profile.get("overview"):
-                        st.write(profile.get("overview"))
-                signals = list(dict.fromkeys([*(retry.get("strategy") or []), *(retry.get("market_signals") or [])]))
-                if signals:
-                    st.subheader("Business & Strategic Signals")
-                    for item in signals:
-                        st.markdown(f"- {str(item).replace('_', ' ').title()}")
-                if retry.get("leadership"):
-                    st.subheader("Leadership Context")
-                    render_structured_content(retry.get("leadership"))
-                if retry.get("sources"):
-                    st.subheader("Research Sources")
-                    render_research_sources(retry.get("sources"))
+            if isinstance(retry, dict) and (retry.get("company_profile") or retry.get("sources") or retry.get("leadership") or retry.get("market_signals")):
+                render_research_package(retry)
+            elif company_supplied:
+                st.info("The company URL was received, but no public-page research content was available for this run.")
             else:
-                st.warning("Company research could not be retrieved for this run. The company URL was received, but the research endpoint returned no package.")
+                st.info("Research inputs were received, but no research content was returned for this run.")
         else:
             st.info("Add a company URL or market inputs to enable public-page research.")
 
