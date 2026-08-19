@@ -7,12 +7,11 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 from .career_tools import build_job_spec, gap_analysis, score_fit
-from .config import DEMO_MODE, GROQ_API_KEY, GROQ_MODEL
+from .config import CHROMA_PERSIST_DIR, DEMO_MODE, GROQ_API_KEY, GROQ_MODEL
 from .evidence import evidence_guard, extract_candidate_profile
+from .kb import CareerKnowledgeBase
 from .models import CareerGuideState
 from .research import build_research_pack
-from .kb import CareerKnowledgeBase
-from .config import CHROMA_PERSIST_DIR
 
 
 def candidate_node(state: CareerGuideState) -> CareerGuideState:
@@ -39,16 +38,53 @@ def jd_node(state: CareerGuideState) -> CareerGuideState:
     return {"job_spec": spec, "keywords": spec.get("keywords", [])}
 
 
+def _empty_research(company_url: str = "") -> dict[str, Any]:
+    package: dict[str, Any] = {
+        "company_profile": {},
+        "leadership": [],
+        "strategy": [],
+        "recent_signals": [],
+        "competitors": [],
+        "sources": [],
+        "market_signals": [],
+    }
+    if company_url:
+        package["company_profile"] = {
+            "name": "Company Research",
+            "overview": "The company URL was supplied, but detailed public-page research was unavailable during this run.",
+            "url": company_url,
+        }
+        package["sources"] = [{"type": "company", "label": "Company Website", "url": company_url}]
+    return package
+
+
 def research_node(state: CareerGuideState) -> CareerGuideState:
-    research = build_research_pack(
-        company_url=state.get("company_url", ""),
-        leadership_url=state.get("leadership_url", ""),
-        market_urls=state.get("market_urls", []),
-        market_query=state.get("market_query", ""),
-    )
+    company_url = state.get("company_url", "").strip()
+    try:
+        research = build_research_pack(
+            company_url=company_url,
+            leadership_url=state.get("leadership_url", ""),
+            market_urls=state.get("market_urls", []),
+            market_query=state.get("market_query", ""),
+        )
+    except Exception as exc:
+        research = _empty_research(company_url)
+        research["research_warning"] = f"Public research step failed: {type(exc).__name__}: {exc}"
+
+    if not isinstance(research, dict):
+        research = _empty_research(company_url)
+
+    if company_url and not research.get("company_profile") and not research.get("sources"):
+        research = _empty_research(company_url)
+
     kb = CareerKnowledgeBase(CHROMA_PERSIST_DIR)
     if research.get("company_profile"):
-        kb.upsert("company-research", json.dumps(research["company_profile"]), {"type": "company-research"})
+        kb.upsert(
+            "company-research",
+            json.dumps(research["company_profile"], ensure_ascii=False),
+            {"type": "company-research"},
+        )
+
     return {"research": research}
 
 
@@ -66,11 +102,105 @@ def fit_node(state: CareerGuideState) -> CareerGuideState:
             "partial": gaps.get("partial", []),
             "risks": gaps.get("missing", []),
         },
-        "keyword_gap": {"matched": fit.get("matched_keywords", []), "missing": fit.get("missing_keywords", [])},
+        "keyword_gap": {
+            "matched": fit.get("matched_keywords", []),
+            "missing": fit.get("missing_keywords", []),
+        },
         "skill_gap": gaps,
         "experience_gap": {"missing_evidence": gaps.get("missing", [])},
         "career_gap": {"priority_gaps": gaps.get("missing", [])},
     }
+
+
+def _parse_json(raw: str) -> dict[str, Any] | None:
+    text = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.I)
+    text = re.sub(r"\s*```$", "", text).strip()
+    try:
+        value = json.loads(text)
+        return value if isinstance(value, dict) else None
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                value = json.loads(text[start : end + 1])
+                return value if isinstance(value, dict) else None
+            except json.JSONDecodeError:
+                return None
+    return None
+
+
+def _plain_text(value: Any) -> str:
+    if not value:
+        return ""
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+    text = re.sub(r"^```(?:markdown|text)?\s*", "", text.strip(), flags=re.I)
+    text = re.sub(r"\s*```$", "", text).strip()
+    text = re.sub(r"^\s{0,3}#{1,6}\s*", "", text, flags=re.M)
+    text = text.replace("**", "").replace("__", "")
+    text = re.sub(r"^\s*[-*_]{3,}\s*$", "", text, flags=re.M)
+    return text.strip()
+
+
+def _compact_context(state: CareerGuideState) -> tuple[str, str, str, str, str, str]:
+    candidate = state.get("candidate_profile", {})
+    job = state.get("job_spec", {})
+    research = state.get("research", {})
+    resume = state.get("resume_text", "")
+    gaps = state.get("career_gap", {}).get("priority_gaps", [])
+    fit = state.get("job_fit", {})
+
+    kb = CareerKnowledgeBase(CHROMA_PERSIST_DIR)
+    evidence = kb.query(" ".join(job.get("keywords", [])[:8]), n_results=3)
+
+    candidate_context = json.dumps(candidate, ensure_ascii=False)[:6000]
+    resume_context = resume[:8000]
+    job_context = json.dumps(job, ensure_ascii=False)[:4500]
+    research_context = json.dumps(
+        {
+            "company_profile": research.get("company_profile"),
+            "leadership": research.get("leadership"),
+            "strategy": research.get("strategy"),
+            "market_signals": research.get("market_signals"),
+            "sources": research.get("sources"),
+        },
+        ensure_ascii=False,
+    )[:3000]
+    gap_context = json.dumps(gaps, ensure_ascii=False)[:1000]
+    fit_context = json.dumps(fit, ensure_ascii=False)[:1200]
+    evidence_context = json.dumps(evidence, ensure_ascii=False)[:2500]
+
+    return (
+        candidate_context,
+        resume_context,
+        job_context,
+        research_context,
+        gap_context,
+        fit_context + "\nEvidence:\n" + evidence_context,
+    )
+
+
+def _generate_cover_letter(llm, candidate_context: str, resume_context: str, job_context: str, fit_context: str) -> str:
+    prompt = f"""Write a concise, professional cover letter for the target role.
+Use ONLY the candidate evidence below. Never invent employers, dates, certifications, metrics, ownership, or skills.
+Return plain text only. Do not use JSON, Markdown headings, **, ##, tables, or --- separators.
+
+CANDIDATE:
+{candidate_context[:2500]}
+
+RESUME:
+{resume_context[:3500]}
+
+TARGET JOB:
+{job_context[:2500]}
+
+ROLE FIT:
+{fit_context[:1000]}
+"""
+    try:
+        response = llm.invoke(prompt)
+        return _plain_text(response.content if isinstance(response.content, str) else str(response.content))
+    except Exception:
+        return ""
 
 
 def generation_node(state: CareerGuideState) -> CareerGuideState:
@@ -80,59 +210,74 @@ def generation_node(state: CareerGuideState) -> CareerGuideState:
     from langchain_groq import ChatGroq
 
     llm = ChatGroq(model=GROQ_MODEL, temperature=0.15, api_key=GROQ_API_KEY)
-    candidate = state.get("candidate_profile", {})
-    job = state.get("job_spec", {})
-    research = state.get("research", {})
-    kb = CareerKnowledgeBase(CHROMA_PERSIST_DIR)
-    evidence_context = kb.query(" ".join(job.get("keywords", [])[:12]), n_results=6)
-    prompt = f"""You are an evidence-first ATS Career Guide.
-Return ONLY valid JSON with exactly these keys:
-optimized_resume, cover_letter, linkedin_optimization, naukri_optimization, interview_kit, career_roadmap.
-Never invent employers, dates, degrees, certifications, metrics, ownership, or skills.
-Use only evidence from the candidate profile/resume. Treat company research as context, not candidate evidence.
-Candidate profile:
-{json.dumps(candidate)[:18000]}
-Resume:
-{state.get('resume_text','')[:24000]}
-Job:
-{json.dumps(job)[:14000]}
-Company research:
-{json.dumps(research)[:12000]}
-Retrieved career evidence:
-{json.dumps(evidence_context)[:12000]}
+    candidate_context, resume_context, job_context, research_context, gap_context, fit_context = _compact_context(state)
 
-For interview_kit return JSON containing 5 sections: resume_questions, company_questions, leadership_questions, technical_or_domain_questions, gap_questions.
-For career_roadmap return 30_days, 60_days, 90_days and longer_term.
-For LinkedIn/Naukri optimization return headline, about_or_summary, skills, keywords, and changes.
+    prompt = f"""You are an evidence-first ATS Career Guide.
+Return ONLY valid JSON with these keys:
+optimized_resume, cover_letter, linkedin_optimization, naukri_optimization, interview_kit, career_roadmap.
+
+Rules:
+- Never invent employers, dates, degrees, certifications, metrics, ownership, or skills.
+- Candidate evidence is authoritative; company research is context only.
+- Preserve every employer as a separate employer block.
+- Keep the optimized resume complete, professional, plain text, and ATS-friendly.
+- Do NOT use Markdown syntax such as **, ##, ###, ---, tables, or fenced code blocks in optimized_resume or cover_letter.
+- Keep the resume concise enough to complete; do not stop after the first employers.
+- Do not duplicate Education, Certifications, Core Skills, or Experience sections.
+- Return an actual cover_letter, not instructions about how to write one.
+
+CANDIDATE:
+{candidate_context}
+
+SOURCE RESUME:
+{resume_context}
+
+TARGET JOB:
+{job_context}
+
+COMPANY / MARKET CONTEXT:
+{research_context}
+
+PRIORITY GAPS:
+{gap_context}
+
+FIT / EVIDENCE:
+{fit_context}
+
+Output requirements:
+- interview_kit: resume_questions, company_questions, leadership_questions, technical_or_domain_questions, gap_questions.
+- career_roadmap: 30_days, 60_days, 90_days, longer_term.
+- linkedin_optimization and naukri_optimization: headline, about_or_summary, skills, keywords, changes.
 """
-    response = llm.invoke(prompt)
-    raw = response.content if isinstance(response.content, str) else str(response.content)
-    payload = parse_json(raw) or {}
-    if not payload.get("cover_letter") and not DEMO_MODE:
-        cover_prompt = f"""Write a concise professional cover letter for the target role using only the candidate evidence below.
-Do not invent employers, dates, metrics, ownership or skills. Return plain text only; no JSON, Markdown headings, bullets, **, ## or --- separators.
-Candidate:
-{candidate_context[:3500]}
-Target Job:
-{job_context[:3000]}
-Job Gaps:
-{json.dumps(gaps, ensure_ascii=False)[:700]}
-"""
-        try:
-            cover_response = llm.invoke(cover_prompt)
-            cover_text = cover_response.content if isinstance(cover_response.content, str) else str(cover_response.content)
-            payload["cover_letter"] = cover_text.strip()
-        except Exception:
+
+    warnings: list[str] = []
+    try:
+        response = llm.invoke(prompt)
+        raw = response.content if isinstance(response.content, str) else str(response.content)
+        payload = _parse_json(raw) or {}
+    except Exception as exc:
+        payload = {}
+        warnings.append(f"Primary AI generation failed: {type(exc).__name__}: {exc}")
+
+    # Dedicated compact cover-letter recovery, using correctly scoped variables.
+    cover_letter = _plain_text(payload.get("cover_letter", ""))
+    if not cover_letter:
+        cover_letter = _generate_cover_letter(llm, candidate_context, resume_context, job_context, fit_context)
+        if not cover_letter:
             warnings.append("Cover letter generation was unavailable for this run.")
 
-    optimized = str(payload.get("optimized_resume", "")).strip()
-    guard = evidence_guard(optimized, candidate)
-    warnings = []
-    if not guard["pass"]:
-        warnings.append("Evidence guard flagged unsupported numeric claims in the generated resume. Review before use.")
+    optimized = _plain_text(payload.get("optimized_resume", ""))
+    guard = evidence_guard(optimized, state.get("candidate_profile", {})) if optimized else {"pass": True}
+    if not guard.get("pass", True):
+        warnings.append("Evidence guard flagged unsupported quantified claims in the generated resume. Review before use.")
+
+    research = state.get("research", {})
+    if isinstance(research, dict) and research.get("research_warning"):
+        warnings.append(str(research["research_warning"]))
+
     return {
         "optimized_resume": optimized,
-        "cover_letter": str(payload.get("cover_letter", "")),
+        "cover_letter": cover_letter,
         "linkedin_optimization": payload.get("linkedin_optimization", {}),
         "naukri_optimization": payload.get("naukri_optimization", {}),
         "interview_kit": payload.get("interview_kit", {}),
@@ -145,7 +290,14 @@ def demo_generation(state: CareerGuideState) -> CareerGuideState:
     spec = state.get("job_spec", {})
     profile = state.get("candidate_profile", {})
     keywords = spec.get("keywords", [])
-    optimized = "ATS CAREER GUIDE RESUME DRAFT\n\nSUMMARY\n" + (profile.get("headline") or "Experienced professional aligned to the target role.") + "\n\nCORE SKILLS\n" + ", ".join(keywords[:18]) + "\n\nPROFESSIONAL EXPERIENCE\n" + state.get("resume_text", "")[:5000]
+    optimized = (
+        "ATS CAREER GUIDE RESUME DRAFT\n\nSUMMARY\n"
+        + (profile.get("headline") or "Experienced professional aligned to the target role.")
+        + "\n\nCORE SKILLS\n"
+        + ", ".join(keywords[:18])
+        + "\n\nPROFESSIONAL EXPERIENCE\n"
+        + state.get("resume_text", "")[:5000]
+    )
     return {
         "optimized_resume": optimized,
         "cover_letter": "Demo mode cover letter placeholder. Enable GROQ_API_KEY for personalized generation.",
@@ -166,23 +318,6 @@ def demo_generation(state: CareerGuideState) -> CareerGuideState:
         },
         "warnings": ["Demo mode is enabled or GROQ_API_KEY is missing; generated materials are placeholders."],
     }
-
-
-def parse_json(raw: str) -> dict[str, Any] | None:
-    text = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.I)
-    text = re.sub(r"\s*```$", "", text)
-    try:
-        value = json.loads(text)
-        return value if isinstance(value, dict) else None
-    except json.JSONDecodeError:
-        start, end = text.find("{"), text.rfind("}")
-        if start >= 0 and end > start:
-            try:
-                value = json.loads(text[start:end + 1])
-                return value if isinstance(value, dict) else None
-            except json.JSONDecodeError:
-                return None
-        return None
 
 
 def build_career_graph():
