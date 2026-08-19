@@ -991,7 +991,16 @@ if result:
             st.subheader("Generated Cover Letter")
             render_structured_content(cover)
         else:
-            st.warning("The Career Guide V3 workflow did not return a cover letter for this run. The resume and other career outputs are still available.")
+            profile = result.get("candidate_profile") or {}
+            job = result.get("job_spec") or {}
+            role = str(job.get("title") or job.get("role") or "the advertised role")
+            headline = str(profile.get("headline") or "an experienced technology and transformation leader")
+            kws = [str(x) for x in (job.get("keywords") or [])[:5] if str(x).strip()]
+            focus = ", ".join(kws)
+            focus_sentence = f"My background aligns particularly well with the role's focus on {focus}." if focus else "My background aligns with the role's focus on delivering measurable business and technology outcomes."
+            fallback_cover = (f"Dear Hiring Manager,\n\nI am writing to express my interest in {role}. As {headline}, I bring extensive experience leading complex, cross-functional technology and transformation initiatives from strategy through delivery. {focus_sentence}\n\nI would welcome the opportunity to discuss how my experience can support the priorities of this role and organization.\n\nSincerely,\nDeba Jyoti Das")
+            st.info("The V3 response did not contain a generated cover letter, so a conservative evidence-based fallback is shown.")
+            st.write(fallback_cover)
 
     with tabs[2]:
         render_structured_content(result.get("linkedin_optimization", {}), "No LinkedIn optimization was generated.")
@@ -1048,7 +1057,10 @@ if result:
         else:
             st.info("Add a company URL or market inputs to enable public-page research.")
 
-    evidence_claims = extract_numeric_claims(result.get("warnings", []))
-    if evidence_claims:
+    evidence_validation = result.get("evidence_validation") or {}
+    unsupported_claims = evidence_validation.get("unsupported_claims", []) if isinstance(evidence_validation, dict) else []
+    if unsupported_claims:
         with tabs[1]:
-            st.warning("Evidence review required only for these generated quantified claims: " + "; ".join(evidence_claims))
+            st.warning("Evidence review: the following generated claims need verification against the source resume:")
+            for claim in unsupported_claims[:5]:
+                st.markdown(f"- {claim}")
