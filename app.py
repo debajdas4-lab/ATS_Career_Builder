@@ -1053,7 +1053,42 @@ if result:
                 st.subheader("Research Sources")
                 render_research_sources(research.get("sources"))
         elif company_supplied:
-            st.info("The V3 Career Guide completed, but no research package was returned. The resume and ATS analysis remain available.")
+            try:
+                r = httpx.post(
+                    f"{API_URL}/v3/research",
+                    data={
+                        "company_url": company_url.strip(),
+                        "leadership_url": leadership_url.strip(),
+                        "market_urls": market_urls,
+                        "market_query": market_query.strip(),
+                    },
+                    timeout=45,
+                )
+                r.raise_for_status()
+                retry = r.json().get("research") or {}
+            except Exception:
+                retry = {}
+
+            if retry:
+                profile = parse_possible_json(retry.get("company_profile", {}))
+                if isinstance(profile, dict):
+                    if profile.get("name"):
+                        st.markdown(f"### {profile.get('name')}")
+                    if profile.get("overview"):
+                        st.write(profile.get("overview"))
+                signals = list(dict.fromkeys([*(retry.get("strategy") or []), *(retry.get("market_signals") or [])]))
+                if signals:
+                    st.subheader("Business & Strategic Signals")
+                    for item in signals:
+                        st.markdown(f"- {str(item).replace('_', ' ').title()}")
+                if retry.get("leadership"):
+                    st.subheader("Leadership Context")
+                    render_structured_content(retry.get("leadership"))
+                if retry.get("sources"):
+                    st.subheader("Research Sources")
+                    render_research_sources(retry.get("sources"))
+            else:
+                st.warning("Company research could not be retrieved for this run. The company URL was received, but the research endpoint returned no package.")
         else:
             st.info("Add a company URL or market inputs to enable public-page research.")
 

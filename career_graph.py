@@ -203,6 +203,39 @@ ROLE FIT:
         return ""
 
 
+
+def _fallback_linkedin(profile: dict[str, Any], job: dict[str, Any], resume_text: str) -> dict[str, Any]:
+    headline = str(profile.get("headline") or "Technical Program & Transformation Leader")
+    keywords = [str(x) for x in (job.get("keywords") or [])[:10] if str(x).strip()]
+    about = str(profile.get("summary") or profile.get("professional_summary") or "Experienced technology and transformation leader with a track record of leading complex, cross-functional programs and delivering measurable business outcomes.")
+    return {
+        "headline": headline,
+        "about_or_summary": about,
+        "skills": keywords,
+        "keywords": keywords,
+        "changes": [
+            "Align the headline to the target role without adding unsupported claims.",
+            "Prioritize experience and skills already evidenced in the resume.",
+            "Use concise achievement bullets with verified outcomes only.",
+        ],
+    }
+
+
+def _fallback_naukri(profile: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]:
+    headline = str(profile.get("headline") or "Technical Program & Transformation Leader")
+    keywords = [str(x) for x in (job.get("keywords") or [])[:12] if str(x).strip()]
+    return {
+        "title": headline,
+        "key_summary": str(profile.get("summary") or profile.get("professional_summary") or "Experienced technology and transformation leader focused on complex program delivery, governance and business outcomes."),
+        "core_competencies": keywords,
+        "keywords": keywords,
+        "changes": [
+            "Keep the profile concise and keyword-aligned to the target role.",
+            "Use employer-wise experience with dates and verified achievements.",
+        ],
+    }
+
+
 def generation_node(state: CareerGuideState) -> CareerGuideState:
     if DEMO_MODE or not GROQ_API_KEY:
         return demo_generation(state)
@@ -275,11 +308,20 @@ Output requirements:
     if isinstance(research, dict) and research.get("research_warning"):
         warnings.append(str(research["research_warning"]))
 
+    linkedin_optimization = payload.get("linkedin_optimization", {})
+    naukri_optimization = payload.get("naukri_optimization", {})
+    if not linkedin_optimization:
+        linkedin_optimization = _fallback_linkedin(state.get("candidate_profile", {}), state.get("job_spec", {}), state.get("resume_text", ""))
+        warnings.append("LinkedIn optimization fallback was used because the primary AI response did not return a structured LinkedIn artifact.")
+    if not naukri_optimization:
+        naukri_optimization = _fallback_naukri(state.get("candidate_profile", {}), state.get("job_spec", {}))
+        warnings.append("Naukri optimization fallback was used because the primary AI response did not return a structured Naukri artifact.")
+
     return {
         "optimized_resume": optimized,
         "cover_letter": cover_letter,
-        "linkedin_optimization": payload.get("linkedin_optimization", {}),
-        "naukri_optimization": payload.get("naukri_optimization", {}),
+        "linkedin_optimization": linkedin_optimization,
+        "naukri_optimization": naukri_optimization,
         "interview_kit": payload.get("interview_kit", {}),
         "career_roadmap": payload.get("career_roadmap", {}),
         "evidence_validation": guard,
