@@ -48,10 +48,9 @@ def _result(resume_text: str, job_description: str) -> dict:
 
 
 def _career_result(state: dict) -> dict:
-    research = state.get("research", {})
+    research = state.get("research") or {}
     if not isinstance(research, dict):
         research = {}
-
     return {
         "status": "success",
         "candidate_profile": state.get("candidate_profile", {}),
