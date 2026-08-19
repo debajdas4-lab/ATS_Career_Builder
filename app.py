@@ -81,30 +81,57 @@ def parse_possible_json(value):
         return value
 
 
-def render_research_sources(sources):
-    sources = parse_possible_json(sources)
-    if not sources:
-        return
-    if isinstance(sources, dict):
-        sources = [sources]
-    for source in sources:
-        source = parse_possible_json(source)
-        if isinstance(source, dict):
-            label = str(source.get("label") or source.get("title") or source.get("type", "Research Source")).strip()
-            url = str(source.get("url", "")).strip().rstrip("]}\'\"),.;")
-            if url.startswith(("http://", "https://")):
-                st.markdown(f"- [{label}]({url})")
-            else:
-                st.markdown(f"- {label}")
-        elif source:
-            st.markdown(f"- {source}")
+
+def clean_resume_for_export(text: str) -> str:
+    """Remove Markdown artifacts and normalize resume formatting before display/export."""
+    if not text:
+        return ""
+
+    lines = []
+    for raw in str(text).splitlines():
+        line = raw.strip()
+
+        # Remove standalone Markdown fences/rules.
+        if line in {"```", "```markdown", "```text", "---", "***", "___"}:
+            continue
+
+        # Remove heading markers and horizontal rules.
+        line = re.sub(r"^\s{0,6}#{1,6}\s*", "", line)
+        line = re.sub(r"^\s*[-*_]{3,}\s*$", "", line)
+
+        # Remove emphasis markers but retain the text.
+        line = re.sub(r"\*\*(.*?)\*\*", r"\1", line)
+        line = re.sub(r"__(.*?)__", r"\1", line)
+        line = re.sub(r"(?<!\*)\*(?!\s)(.*?)(?<!\s)\*(?!\*)", r"\1", line)
+        line = re.sub(r"(?<!_)_(?!\s)(.*?)(?<!\s)_(?!_)", r"\1", line)
+
+        # Convert Markdown bullets to the renderer's plain bullet format.
+        line = re.sub(r"^\s*[-*+]\s+", "• ", line)
+
+        # Normalize repeated spaces.
+        line = re.sub(r"[ \t]{2,}", " ", line).strip()
+
+        if line:
+            lines.append(line)
+
+    return "\n".join(lines).strip()
+
+
+def extract_generated_numeric_claims(warnings) -> list[str]:
+    """Extract numeric claims from Evidence Guard warnings for display."""
+    claims = []
+    for warning in warnings or []:
+        match = re.search(r"quantified claims:\s*(.+)$", str(warning), flags=re.I)
+        if match:
+            claims.extend([x.strip() for x in re.split(r",\s*|\.\s+", match.group(1)) if x.strip()])
+    return list(dict.fromkeys(claims))
 
 
 def normalize_resume_output(value) -> str:
     parsed = parse_possible_json(value)
     if isinstance(parsed, dict):
         value = parsed.get("optimized_resume") or parsed.get("resume") or parsed.get("content") or ""
-    return str(value or "").strip()
+    return clean_resume_for_export(str(value or ""))
 
 
 def render_structured_content(value, empty_message="No content available."):
@@ -784,7 +811,7 @@ if st.button("🚀 Analyze job & build career guide", type="primary", use_contai
 
     try:
         response = httpx.post(
-            f"{API_URL}/v3/career-guide",
+            f"{API_URL}/v2/career-guide",
             files={"resume": (resume_file.name, resume_file.getvalue(), resume_file.type)},
             data={
                 "job_description": jd_text,
@@ -815,55 +842,6 @@ if st.button("🚀 Analyze job & build career guide", type="primary", use_contai
     except Exception as exc:
         st.error(f"Unexpected Streamlit error: {type(exc).__name__}: {exc}")
 
-def get_cover_letter_payload(result):
-    """Find cover-letter content even when the v3 API nests or serializes it."""
-    def search(value):
-        value = parse_possible_json(value)
-        if isinstance(value, dict):
-            for key, item in value.items():
-                key_norm = str(key).lower().replace("-", "_").replace(" ", "_")
-                if key_norm in {
-                    "cover_letter", "coverletter", "cover_letter_text",
-                    "cover_letter_content", "coverletter_content"
-                } and item:
-                    return item
-                found = search(item)
-                if found:
-                    return found
-        elif isinstance(value, list):
-            for item in value:
-                found = search(item)
-                if found:
-                    return found
-        return ""
-
-    return search(result)
-
-
-def get_research_payload(result):
-    return (
-        result.get("research")
-        or result.get("research_pack")
-        or result.get("company_research")
-        or result.get("company_market_intelligence")
-        or {}
-    )
-
-
-def find_api_endpoint(suffixes):
-    """Discover the deployed FastAPI route from OpenAPI so v1/v3 mismatches do not break downloads."""
-    try:
-        openapi = httpx.get(f"{API_URL}/openapi.json", timeout=10).json()
-        paths = openapi.get("paths", {})
-        for suffix in suffixes:
-            for path in paths:
-                if path.rstrip("/") == suffix:
-                    return path
-    except Exception:
-        pass
-    return ""
-
-
 result = st.session_state.get("career_result")
 if result:
     st.divider()
@@ -887,54 +865,17 @@ if result:
         st.write("**Missing:** " + (", ".join(result.get("keyword_gap", {}).get("missing", [])) or "None"))
 
     with tabs[1]:
-        optimized_resume = normalize_resume_output(result.get("optimized_resume", ""))
+        optimized_resume = clean_resume_for_export(normalize_resume_output(result.get("optimized_resume", "")))
         st.markdown(resume_preview(optimized_resume), unsafe_allow_html=True)
         st.download_button("Download TXT", optimized_resume, "ats-career-guide-resume.txt", "text/plain")
         try:
-            if not optimized_resume.strip():
-                st.warning("DOCX export is unavailable because the optimized resume is empty.")
-            else:
-                export_path = find_api_endpoint(["/v3/export-docx", "/v1/export-docx"])
-                if not export_path:
-                    raise RuntimeError(
-                        "No DOCX export endpoint is exposed by the deployed FastAPI service. "
-                        "Open /docs and confirm that an export-docx route is available."
-                    )
-
-                docx_response = httpx.post(
-                    f"{API_URL}{export_path}",
-                    json={"resume_text": optimized_resume},
-                    timeout=45,
-                )
-                docx_response.raise_for_status()
-                st.download_button(
-                    "Download DOCX",
-                    docx_response.content,
-                    "ats-career-guide-resume.docx",
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                )
-        except httpx.HTTPStatusError as exc:
-            detail = exc.response.text.strip()
-            try:
-                detail = str(exc.response.json().get("detail", detail))
-            except Exception:
-                pass
-            st.warning(f"DOCX export returned HTTP {exc.response.status_code}: {detail}")
-        except httpx.RequestError as exc:
-            st.warning(f"Could not connect to the DOCX export API: {exc}")
-        except Exception as exc:
-            st.warning(f"DOCX export failed: {type(exc).__name__}: {exc}")
-
-        st.subheader("Cover Letter")
-        cover_letter = get_cover_letter_payload(result)
-        if cover_letter:
-            st.subheader("Generated Cover Letter")
-            render_structured_content(cover_letter)
-        else:
-            st.info(
-                "No cover letter was returned by the deployed Career Guide API for this run. "
-                "The Resume output is available, but the current /v3 workflow did not return a cover-letter artifact."
-            )
+            docx_response = httpx.post(f"{API_URL}/v1/export-docx", json={"resume_text": optimized_resume}, timeout=30)
+            docx_response.raise_for_status()
+            st.download_button("Download DOCX", docx_response.content, "ats-career-guide-resume.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        except Exception:
+            pass
+        st.subheader("Cover letter")
+        render_structured_content(result.get("cover_letter", ""), "No cover letter was generated.")
 
     with tabs[2]:
         render_structured_content(result.get("linkedin_optimization", {}), "No LinkedIn optimization was generated.")
@@ -965,51 +906,13 @@ if result:
         render_structured_content(result.get("career_roadmap", {}), "No career roadmap was generated.")
 
     with tabs[6]:
-        research = parse_possible_json(get_research_payload(result))
-        st.subheader("Company & Market Intelligence")
-
-        if not research:
-            if company_url.strip():
-                st.info(
-                    "A company URL was supplied, but the deployed Career Guide API did not return a research package. "
-                    "Check the Render logs for the /v3/career-guide response and research step."
-                )
-            else:
-                st.info("Add a Company Website / Profile URL to enable public-page research.")
-        else:
-            if isinstance(research, dict):
-                company_profile = parse_possible_json(research.get("company_profile", {}))
-                if isinstance(company_profile, dict):
-                    if company_profile.get("name"):
-                        st.markdown(f"### {company_profile.get('name')}")
-                    if company_profile.get("overview"):
-                        st.write(company_profile.get("overview"))
-
-                signals = list(dict.fromkeys([
-                    *(research.get("strategy", []) or []),
-                    *(research.get("market_signals", []) or []),
-                    *(research.get("recent_signals", []) or []),
-                ]))
-                st.subheader("Business & Strategic Signals")
-                if signals:
-                    for signal in signals:
-                        st.markdown(f"- {str(signal).replace('_', ' ').title()}")
-                else:
-                    st.caption("No strong strategic signals were detected from the supplied research sources.")
-
-                if research.get("leadership"):
-                    st.subheader("Leadership Context")
-                    render_structured_content(research.get("leadership"))
-
-                if research.get("competitors"):
-                    st.subheader("Market Context")
-                    st.write(", ".join(map(str, research.get("competitors", []))))
-
-                if research.get("sources"):
-                    st.subheader("Research Sources")
-                    render_research_sources(research.get("sources"))
-            else:
-                render_structured_content(research)
+        research = result.get("research", {})
+        st.subheader("Company / market signals")
+        st.write(", ".join(research.get("strategy", [])) or "Add a company URL to enable public-page research.")
+        if research.get("sources"):
+            st.subheader("Sources")
+            for source in research["sources"]:
+                st.write(source)
 
     for warning in result.get("warnings", []):
         st.warning(warning)
