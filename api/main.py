@@ -48,11 +48,15 @@ def _result(resume_text: str, job_description: str) -> dict:
 
 
 def _career_result(state: dict) -> dict:
+    research = state.get("research", {})
+    if not isinstance(research, dict):
+        research = {}
+
     return {
         "status": "success",
         "candidate_profile": state.get("candidate_profile", {}),
         "job_spec": state.get("job_spec", {}),
-        "research": state.get("research", {}),
+        "research": research,
         "ats_analysis": state.get("ats_analysis", {}),
         "job_fit": state.get("job_fit", {}),
         "keyword_gap": state.get("keyword_gap", {}),
@@ -66,7 +70,7 @@ def _career_result(state: dict) -> dict:
         "interview_kit": state.get("interview_kit", {}),
         "career_roadmap": state.get("career_roadmap", {}),
         "warnings": state.get("warnings", []),
-        "sources": state.get("research", {}).get("sources", []),
+        "sources": research.get("sources", []),
     }
 
 
@@ -111,6 +115,7 @@ def career_guide_text(request: CareerGuideTextRequest) -> dict:
             company_url=request.company_url,
             leadership_url=request.leadership_url,
             market_urls=request.market_urls,
+            market_query=request.market_query,
             linkedin_profile=request.linkedin_profile,
             naukri_profile=request.naukri_profile,
         )
