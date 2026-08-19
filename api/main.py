@@ -9,6 +9,7 @@ from core.config import MAX_RESUME_BYTES
 from core.docx_export import build_docx
 from core.graph import optimize_resume
 from core.career_graph import run_career_guide
+from core.research import build_research_pack
 from core.parsing import extract_resume_text, fetch_job_description
 
 app = FastAPI(title="ATS Career Builder V3", version="3.1.0")
@@ -45,6 +46,31 @@ def _result(resume_text: str, job_description: str) -> dict:
         "cover_note": state.get("cover_note", ""),
         "warnings": state.get("warnings", []),
     }
+
+
+def _fallback_cover_letter(state: dict) -> str:
+    profile = state.get("candidate_profile") or {}
+    job = state.get("job_spec") or {}
+    headline = str(profile.get("headline") or "experienced professional").strip()
+    role = str(job.get("title") or job.get("role") or "the advertised role").strip()
+    skills = job.get("keywords") or []
+    skills_text = ", ".join(str(x) for x in skills[:5] if str(x).strip()) if isinstance(skills, list) else ""
+    fit_line = f" The role's emphasis on {skills_text} aligns with areas highlighted in my professional background." if skills_text else ""
+    return (f"Dear Hiring Manager,\n\nI am writing to express my interest in {role}. My background as {headline} has given me experience working across complex initiatives, cross-functional stakeholders, delivery governance, and business outcomes.{fit_line}\n\nI would welcome the opportunity to discuss how the experience documented in my resume can support the priorities of this role. This letter is intentionally grounded in the evidence provided in my application materials.\n\nSincerely,\nCandidate")
+
+
+def _ensure_v3_artifacts(state: dict, *, company_url: str = "", leadership_url: str = "", market_urls: list[str] | None = None, market_query: str = "") -> dict:
+    state = dict(state or {})
+    research = state.get("research")
+    research_requested = bool(company_url or leadership_url or (market_urls or []) or market_query)
+    if research_requested and (not isinstance(research, dict) or not research):
+        try:
+            state["research"] = build_research_pack(company_url=company_url, leadership_url=leadership_url, market_urls=market_urls or [], market_query=market_query)
+        except Exception as exc:
+            state["research"] = {"company_profile": ({"name": "Company Research", "overview": "The company URL was supplied, but public-page research was unavailable during this run.", "url": company_url} if company_url else {}), "leadership": [], "strategy": [], "recent_signals": [], "competitors": [], "sources": ([{"type": "company", "label": "Company Website", "url": company_url}] if company_url else []), "market_signals": [], "research_warning": f"Research fallback used: {type(exc).__name__}: {exc}"}
+    if not str(state.get("cover_letter") or "").strip():
+        state["cover_letter"] = _fallback_cover_letter(state)
+    return state
 
 
 def _career_result(state: dict) -> dict:
@@ -146,18 +172,20 @@ async def career_guide_v3(
         jd = job_description.strip() or await fetch_job_description(job_url.strip())
         if len(jd) < 80:
             raise ValueError("Provide a job description as text or a URL.")
+        parsed_market_urls = [u.strip() for u in market_urls.splitlines() if u.strip()]
         state = run_career_guide(
             resume_text=resume_text,
             job_description=jd,
             job_url=job_url.strip(),
             company_url=company_url.strip(),
             leadership_url=leadership_url.strip(),
-            market_urls=[u.strip() for u in market_urls.splitlines() if u.strip()],
+            market_urls=parsed_market_urls,
             market_query=market_query.strip(),
             linkedin_profile=linkedin_profile,
             naukri_profile=naukri_profile,
             analysis_mode=analysis_mode,
         )
+        state = _ensure_v3_artifacts(state, company_url=company_url.strip(), leadership_url=leadership_url.strip(), market_urls=parsed_market_urls, market_query=market_query.strip())
         return _career_result(state)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
