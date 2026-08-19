@@ -816,13 +816,28 @@ if st.button("🚀 Analyze job & build career guide", type="primary", use_contai
         st.error(f"Unexpected Streamlit error: {type(exc).__name__}: {exc}")
 
 def get_cover_letter_payload(result):
-    return (
-        result.get("cover_letter")
-        or result.get("coverLetter")
-        or result.get("cover_letter_text")
-        or (result.get("application_materials", {}) or {}).get("cover_letter")
-        or ""
-    )
+    """Find cover-letter content even when the v3 API nests or serializes it."""
+    def search(value):
+        value = parse_possible_json(value)
+        if isinstance(value, dict):
+            for key, item in value.items():
+                key_norm = str(key).lower().replace("-", "_").replace(" ", "_")
+                if key_norm in {
+                    "cover_letter", "coverletter", "cover_letter_text",
+                    "cover_letter_content", "coverletter_content"
+                } and item:
+                    return item
+                found = search(item)
+                if found:
+                    return found
+        elif isinstance(value, list):
+            for item in value:
+                found = search(item)
+                if found:
+                    return found
+        return ""
+
+    return search(result)
 
 
 def get_research_payload(result):
@@ -833,6 +848,20 @@ def get_research_payload(result):
         or result.get("company_market_intelligence")
         or {}
     )
+
+
+def find_api_endpoint(suffixes):
+    """Discover the deployed FastAPI route from OpenAPI so v1/v3 mismatches do not break downloads."""
+    try:
+        openapi = httpx.get(f"{API_URL}/openapi.json", timeout=10).json()
+        paths = openapi.get("paths", {})
+        for suffix in suffixes:
+            for path in paths:
+                if path.rstrip("/") == suffix:
+                    return path
+    except Exception:
+        pass
+    return ""
 
 
 result = st.session_state.get("career_result")
@@ -865,8 +894,15 @@ if result:
             if not optimized_resume.strip():
                 st.warning("DOCX export is unavailable because the optimized resume is empty.")
             else:
+                export_path = find_api_endpoint(["/v3/export-docx", "/v1/export-docx"])
+                if not export_path:
+                    raise RuntimeError(
+                        "No DOCX export endpoint is exposed by the deployed FastAPI service. "
+                        "Open /docs and confirm that an export-docx route is available."
+                    )
+
                 docx_response = httpx.post(
-                    f"{API_URL}/v1/export-docx",
+                    f"{API_URL}{export_path}",
                     json={"resume_text": optimized_resume},
                     timeout=45,
                 )
@@ -892,9 +928,13 @@ if result:
         st.subheader("Cover Letter")
         cover_letter = get_cover_letter_payload(result)
         if cover_letter:
+            st.subheader("Generated Cover Letter")
             render_structured_content(cover_letter)
         else:
-            st.info("No cover letter was returned by the Career Guide API for this run.")
+            st.info(
+                "No cover letter was returned by the deployed Career Guide API for this run. "
+                "The Resume output is available, but the current /v3 workflow did not return a cover-letter artifact."
+            )
 
     with tabs[2]:
         render_structured_content(result.get("linkedin_optimization", {}), "No LinkedIn optimization was generated.")
