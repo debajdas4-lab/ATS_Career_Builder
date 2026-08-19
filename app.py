@@ -127,11 +127,91 @@ def extract_generated_numeric_claims(warnings) -> list[str]:
     return list(dict.fromkeys(claims))
 
 
+def clean_resume_text(value) -> str:
+    """Remove Markdown artifacts from resume text before display or export."""
+    if not value:
+        return ""
+    text = str(value).replace("\r\n", "\n").replace("\r", "\n")
+    lines = []
+    for raw in text.split("\n"):
+        line = raw.strip()
+        if not line or line in {"---", "***", "___", "```", "```markdown", "```text"}:
+            if not line:
+                lines.append("")
+            continue
+        line = re.sub(r"^\s*#{1,6}\s*", "", line)
+        line = re.sub(r"\*\*(.*?)\*\*", r"\1", line)
+        line = re.sub(r"__(.*?)__", r"\1", line)
+        line = re.sub(r"(?<!\*)\*(?!\s)(.*?)(?<!\s)\*(?!\*)", r"\1", line)
+        line = re.sub(r"(?<!_)_(?!\s)(.*?)(?<!\s)_(?!_)", r"\1", line)
+        line = re.sub(r"^[-*+]\s+", "• ", line)
+        line = re.sub(r"\s{2,}", " ", line).strip()
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def recursive_find(value, keys):
+    value = parse_possible_json(value)
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if str(k).lower().replace("-", "_").replace(" ", "_") in keys and v:
+                return v
+            found = recursive_find(v, keys)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for item in value:
+            found = recursive_find(item, keys)
+            if found:
+                return found
+    return ""
+
+
+def render_research_sources(sources):
+    sources = parse_possible_json(sources)
+    if not sources:
+        return
+    if isinstance(sources, dict):
+        sources = [sources]
+    for source in sources:
+        source = parse_possible_json(source)
+        if isinstance(source, dict):
+            label = str(source.get("label") or source.get("title") or source.get("type", "Research Source")).strip()
+            url = str(source.get("url", "")).strip().rstrip("]}')\"),.;")
+            if url.startswith(("http://", "https://")):
+                st.markdown(f"- [{label}]({url})")
+            else:
+                st.markdown(f"- {label}")
+
+
+def render_profile_content(value, title):
+    value = parse_possible_json(value)
+    st.subheader(title)
+    if isinstance(value, dict):
+        for key, item in value.items():
+            st.markdown(f"#### {str(key).replace('_', ' ').title()}")
+            render_structured_content(item)
+    elif value:
+        st.write(value)
+    else:
+        st.info(f"No {title.lower()} was generated.")
+
+
+def extract_numeric_claims(warnings):
+    claims = []
+    for warning in warnings or []:
+        if isinstance(warning, dict):
+            claims.extend(warning.get("unsupported_claims", []))
+        else:
+            claims.extend(re.findall(r"quantified claims:\s*(.+)$", str(warning), flags=re.I))
+    return claims
+
+
 def normalize_resume_output(value) -> str:
     parsed = parse_possible_json(value)
     if isinstance(parsed, dict):
         value = parsed.get("optimized_resume") or parsed.get("resume") or parsed.get("content") or ""
-    return clean_resume_for_export(str(value or ""))
+    return clean_resume_text(str(value or ""))
 
 
 def render_structured_content(value, empty_message="No content available."):
@@ -815,7 +895,8 @@ if st.button("🚀 Analyze job & build career guide", type="primary", use_contai
             f"{API_URL}/v3/career-guide",
             files={"resume": (resume_file.name, resume_file.getvalue(), resume_file.type)},
             data={
-                "job_description": jd_text,
+                "analysis_mode": "Fast Resume",
+                    "job_description": jd_text,
                 "job_url": jd_url,
                 "company_url": company_url,
                 "leadership_url": leadership_url,
@@ -834,8 +915,10 @@ if st.button("🚀 Analyze job & build career guide", type="primary", use_contai
         try:
             payload = exc.response.json()
             detail = str(payload.get("detail", payload))
-        except Exception:
-            pass
+        except httpx.HTTPStatusError as exc:
+            st.warning(f"DOCX export returned HTTP {exc.response.status_code}: {exc.response.text.strip()}")
+        except Exception as exc:
+            st.warning(f"DOCX export failed: {type(exc).__name__}: {exc}")
         st.error(f"ATS Career Guide API returned HTTP {exc.response.status_code}: {detail}")
         if exc.response.status_code == 404:
             st.caption(
@@ -854,11 +937,30 @@ if result:
     st.divider()
     fit = result.get("job_fit", {})
     ats = result.get("ats_analysis", {})
+    optimized_resume_for_score = normalize_resume_output(result.get("optimized_resume", ""))
+    before_ats = float(ats.get("score", 0) or 0)
+    after_ats = before_ats
+    after_score_available = False
+    if optimized_resume_for_score and jd_text.strip():
+        try:
+            score_response = httpx.post(
+                f"{API_URL}/v3/score-resume",
+                json={"resume_text": optimized_resume_for_score, "job_description": jd_text},
+                timeout=90,
+            )
+            score_response.raise_for_status()
+            after_ats = float(score_response.json().get("ats_analysis", {}).get("score", before_ats) or before_ats)
+            after_score_available = True
+        except Exception:
+            pass
+
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Overall fit", f"{fit.get('overall', 0)} / 100")
-    k2.metric("ATS fit", f"{ats.get('score', 0)} / 100")
-    k3.metric("Leadership fit", f"{ats.get('leadership_score', 0)} / 100")
+    k2.metric("ATS fit — Current", f"{before_ats:.0f} / 100")
+    k3.metric("ATS fit — Upgraded", f"{after_ats:.0f} / 100" if after_score_available else "Not available", delta=f"{after_ats-before_ats:+.0f} pts" if after_score_available else None)
     k4.metric("Decision", fit.get("recommendation", "REVIEW"))
+    if after_score_available:
+        st.success(f"Resume upgrade impact: ATS fit changed from {before_ats:.0f}/100 to {after_ats:.0f}/100 ({after_ats-before_ats:+.0f} points) against the same Job Description.")
 
     tabs = st.tabs(["Fit & Gaps", "Resume", "LinkedIn", "Naukri", "Interview Kit", "Career Roadmap", "Research"])
 
@@ -872,17 +974,24 @@ if result:
         st.write("**Missing:** " + (", ".join(result.get("keyword_gap", {}).get("missing", [])) or "None"))
 
     with tabs[1]:
-        optimized_resume = clean_resume_for_export(normalize_resume_output(result.get("optimized_resume", "")))
+        optimized_resume = normalize_resume_output(result.get("optimized_resume", ""))
         st.markdown(resume_preview(optimized_resume), unsafe_allow_html=True)
         st.download_button("Download TXT", optimized_resume, "ats-career-guide-resume.txt", "text/plain")
         try:
-            docx_response = httpx.post(f"{API_URL}/v1/export-docx", json={"resume_text": optimized_resume}, timeout=30)
+            docx_response = httpx.post(f"{API_URL}/v3/export-docx", json={"resume_text": optimized_resume}, timeout=45)
             docx_response.raise_for_status()
             st.download_button("Download DOCX", docx_response.content, "ats-career-guide-resume.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-        except Exception:
-            pass
-        st.subheader("Cover letter")
-        render_structured_content(result.get("cover_letter", ""), "No cover letter was generated.")
+        except httpx.HTTPStatusError as exc:
+            st.warning(f"DOCX export returned HTTP {exc.response.status_code}: {exc.response.text.strip()}")
+        except Exception as exc:
+            st.warning(f"DOCX export failed: {type(exc).__name__}: {exc}")
+
+        cover = recursive_find(result, {"cover_letter", "coverletter", "cover_letter_text", "cover_letter_content"})
+        if cover:
+            st.subheader("Generated Cover Letter")
+            render_structured_content(cover)
+        else:
+            st.warning("The Career Guide V3 workflow did not return a cover letter for this run. The resume and other career outputs are still available.")
 
     with tabs[2]:
         render_structured_content(result.get("linkedin_optimization", {}), "No LinkedIn optimization was generated.")
@@ -913,13 +1022,33 @@ if result:
         render_structured_content(result.get("career_roadmap", {}), "No career roadmap was generated.")
 
     with tabs[6]:
-        research = result.get("research", {})
-        st.subheader("Company / market signals")
-        st.write(", ".join(research.get("strategy", [])) or "Add a company URL to enable public-page research.")
-        if research.get("sources"):
-            st.subheader("Sources")
-            for source in research["sources"]:
-                st.write(source)
+        research = result.get("research") or {}
+        st.subheader("Company & Market Intelligence")
+        company_supplied = bool(company_url.strip())
+        if research:
+            profile = parse_possible_json(research.get("company_profile", {}))
+            if isinstance(profile, dict):
+                if profile.get("name"):
+                    st.markdown(f"### {profile.get('name')}")
+                if profile.get("overview"):
+                    st.write(profile.get("overview"))
+            signals = list(dict.fromkeys([*(research.get("strategy") or []), *(research.get("market_signals") or [])]))
+            if signals:
+                st.subheader("Business & Strategic Signals")
+                for item in signals:
+                    st.markdown(f"- {str(item).replace('_', ' ').title()}")
+            if research.get("leadership"):
+                st.subheader("Leadership Context")
+                render_structured_content(research.get("leadership"))
+            if research.get("sources"):
+                st.subheader("Research Sources")
+                render_research_sources(research.get("sources"))
+        elif company_supplied:
+            st.info("The V3 Career Guide completed, but no research package was returned. The resume and ATS analysis remain available.")
+        else:
+            st.info("Add a company URL or market inputs to enable public-page research.")
 
-    for warning in result.get("warnings", []):
-        st.warning(warning)
+    evidence_claims = extract_numeric_claims(result.get("warnings", []))
+    if evidence_claims:
+        with tabs[1]:
+            st.warning("Evidence review required only for these generated quantified claims: " + "; ".join(evidence_claims))
