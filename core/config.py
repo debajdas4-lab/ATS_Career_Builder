@@ -13,3 +13,4 @@ GROQ_TPM_SAFE_MODE = os.getenv("GROQ_TPM_SAFE_MODE", "true").lower() == "true"
 DEMO_MODE = os.getenv("DEMO_MODE", "false").lower() == "true"
 MAX_RESUME_BYTES = int(os.getenv("MAX_RESUME_BYTES", "8000000"))
 ENABLE_COMPANY_RESEARCH = os.getenv("ENABLE_COMPANY_RESEARCH", "false").lower() == "true"
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
