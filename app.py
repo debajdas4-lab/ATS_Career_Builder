@@ -719,6 +719,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 API_URL = setting("RESUME_API_URL", "http://localhost:8000").rstrip("/")
+# V3 API contract: /v3/career-guide and /v3/export-docx
 
 with st.sidebar:
     st.markdown("""
@@ -811,7 +812,7 @@ if st.button("🚀 Analyze job & build career guide", type="primary", use_contai
 
     try:
         response = httpx.post(
-            f"{API_URL}/v2/career-guide",
+            f"{API_URL}{career_guide_path}",
             files={"resume": (resume_file.name, resume_file.getvalue(), resume_file.type)},
             data={
                 "job_description": jd_text,
@@ -836,11 +837,17 @@ if st.button("🚀 Analyze job & build career guide", type="primary", use_contai
         except Exception:
             pass
         st.error(f"ATS Career Guide API returned HTTP {exc.response.status_code}: {detail}")
+        if exc.response.status_code == 404:
+            st.caption(
+                "The deployed Render API did not expose the expected V3 Career Guide route. "
+                "Expected: POST /v3/career-guide. Verify the Render deployment is serving ATS Career Builder V3."
+            )
         st.caption("If the message mentions JD extraction, paste the full job description in the field above. If it mentions Groq, ChromaDB, or another dependency, check the FastAPI terminal for the full exception.")
     except httpx.RequestError as exc:
         st.error(f"Could not connect to the ATS Career Guide API: {exc}")
     except Exception as exc:
         st.error(f"Unexpected Streamlit error: {type(exc).__name__}: {exc}")
+
 
 result = st.session_state.get("career_result")
 if result:
