@@ -22,12 +22,15 @@ class CareerGuideState(TypedDict, total=False):
     executive_branding: dict[str, Any]
     achievement_strategy: dict[str, Any]
     optimized_resume: str
+    cover_letter: str
     linkedin_optimization: dict[str, Any]
     naukri_optimization: dict[str, Any]
     interview_kit: dict[str, Any]
     career_roadmap: dict[str, Any]
     keyword_gap: dict[str, Any]
     skill_gap: dict[str, Any]
+    experience_gap: dict[str, Any]
+    career_gap: dict[str, Any]
     job_fit: dict[str, Any]
     evidence_validation: dict[str, Any]
     warnings: list[str]
