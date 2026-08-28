@@ -1,18 +1,53 @@
+# ---------------------------------------------------------------------------
+# Render.com blueprint: two services (API + UI) from the same Docker image.
+# Set secret values (Azure IDs/secret, LLM key) in the Render dashboard.
+# ---------------------------------------------------------------------------
 services:
   - type: web
-    name: resume-optimizer-api
-    runtime: python
-    region: singapore
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    name: ats-career-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.3
-      - key: GROQ_API_KEY
+      - key: SERVICE
+        value: api
+      - key: AUTH_ENABLED
+        value: "true"
+      - key: AZURE_TENANT_ID
         sync: false
-      - key: GROQ_MODEL
-        value: llama-3.3-70b-versatile
-      - key: DEMO_MODE
-        value: "false"
+      - key: AZURE_CLIENT_ID
+        sync: false
+      - key: AZURE_API_SCOPE
+        sync: false
+      - key: AUTH_ALLOWED_GROUPS
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
 
+  - type: web
+    name: ats-career-ui
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: SERVICE
+        value: ui
+      - key: PORT
+        value: "8501"
+      - key: RESUME_API_URL
+        fromService:
+          type: web
+          name: ats-career-api
+          property: hostport
+      - key: AZURE_TENANT_ID
+        sync: false
+      - key: AZURE_UI_CLIENT_ID
+        sync: false
+      - key: AZURE_CLIENT_SECRET
+        sync: false
+      - key: AZURE_REDIRECT_URI
+        sync: false
+      - key: AZURE_API_SCOPE
+        sync: false
