@@ -19,6 +19,7 @@ numpy>=1.26
 # Required only when AUTH_ENABLED=true (the app runs open without them locally).
 msal>=1.31            # UI-side Authorization Code flow
 python-jose[cryptography]>=3.3   # API-side JWT (RS256) validation
+truststore
 
 # ---- Optional LLM (OpenAI-compatible: Groq / OpenAI / Azure OpenAI) ----
 # The app runs fully without these; set LLM_API_KEY to enable LLM generation.
