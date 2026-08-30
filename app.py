@@ -131,8 +131,23 @@ st.markdown(
 
     .main .block-container {
         max-width: 1500px;
-        padding-top: 1.2rem;
+        padding-top: 0.25rem !important;
         padding-bottom: 3rem;
+    }
+
+    /* Minimize Streamlit's top chrome gap without shifting the banner
+       into the browser/header area. */
+    [data-testid="stAppViewContainer"] > .main {
+        padding-top: 0rem !important;
+    }
+
+    [data-testid="stHeader"] {
+        height: 0rem !important;
+        min-height: 0rem !important;
+    }
+
+    [data-testid="stToolbar"] {
+        top: 0rem !important;
     }
 
 
@@ -519,6 +534,77 @@ st.markdown(
         margin: .8rem 0 .3rem;
     }
 
+    /* ===================================================================== */
+    /* FILE UPLOADER                                                         */
+    /* ===================================================================== */
+
+    section[data-testid="stFileUploader"] {
+        width: 100%;
+    }
+
+    section[data-testid="stFileUploader"] > div {
+        background: #1B2540 !important;
+        border: 1px dashed #52658A !important;
+        border-radius: 12px !important;
+        padding: 1rem !important;
+    }
+
+    section[data-testid="stFileUploader"] button {
+        background: linear-gradient(
+            90deg,
+            var(--violet),
+            var(--violet2)
+        ) !important;
+        color: #FFFFFF !important;
+        border: 1px solid var(--violet) !important;
+        border-radius: 9px !important;
+        font-weight: 700 !important;
+        min-height: 42px !important;
+        padding: 0.45rem 1rem !important;
+        box-shadow: 0 4px 12px rgba(108, 92, 231, .20) !important;
+    }
+
+    section[data-testid="stFileUploader"] button:hover {
+        background: linear-gradient(
+            90deg,
+            #5B4BE0,
+            #796BE9
+        ) !important;
+        color: #FFFFFF !important;
+        border-color: #5B4BE0 !important;
+    }
+
+    section[data-testid="stFileUploader"] button span,
+    section[data-testid="stFileUploader"] button p {
+        color: #FFFFFF !important;
+        font-weight: 700 !important;
+    }
+
+    section[data-testid="stFileUploader"] button svg {
+        color: #FFFFFF !important;
+        fill: currentColor !important;
+    }
+
+    section[data-testid="stFileUploader"] small {
+        color: #AEBED9 !important;
+        font-size: 0.78rem !important;
+    }
+
+    section[data-testid="stFileUploader"] section {
+        color: #DCE6FA !important;
+    }
+
+    section[data-testid="stFileUploader"] section * {
+        color: inherit;
+    }
+
+    section[data-testid="stFileUploader"] label {
+        color: #DCE6FA !important;
+    }
+
+    section[data-testid="stFileUploader"] [data-testid="stFileUploaderFileName"] {
+        color: #FFFFFF !important;
+    }
 
     /* ===================================================================== */
     /* STATUS / ALERTS                                                       */
