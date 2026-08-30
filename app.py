@@ -535,91 +535,88 @@ st.markdown(
     }
 
     /* ===================================================================== */
-    /* FILE UPLOADER                                                         */
+    /* FILE UPLOADER — Streamlit Cloud + Local                               */
     /* ===================================================================== */
 
-    section[data-testid="stFileUploader"] {
+    [data-testid="stFileUploader"] {
         width: 100% !important;
     }
 
-    /* Actual drop-zone surface used by newer Streamlit builds */
-    section[data-testid="stFileUploader"] [data-testid="stFileUploaderDropzone"] {
+    /* IMPORTANT: stFileUploader is not consistently a <section> in Cloud.
+       Target Streamlit test IDs directly so this works in both environments. */
+    [data-testid="stFileUploaderDropzone"] {
         width: 100% !important;
         background: #1B2540 !important;
         border: 1px dashed #52658A !important;
         border-radius: 12px !important;
         padding: 1rem !important;
+        opacity: 1 !important;
     }
 
-    /* Fallback for Streamlit builds without the Dropzone test id */
-    section[data-testid="stFileUploader"] > div {
-        width: 100% !important;
-        background: #1B2540 !important;
-        border-radius: 12px !important;
+    [data-testid="stFileUploaderDropzone"] div,
+    [data-testid="stFileUploaderDropzone"] span,
+    [data-testid="stFileUploaderDropzone"] p {
+        color: #EAF0FF !important;
+        opacity: 1 !important;
     }
 
-    /* Streamlit 1.48+ file uploader button */
-    section[data-testid="stFileUploader"] button[data-testid="stBaseButton-secondary"],
-    section[data-testid="stFileUploader"] button[kind="secondary"],
-    section[data-testid="stFileUploader"] button {
+    [data-testid="stFileUploaderDropzone"] small {
+        color: #AEBED9 !important;
+        opacity: 1 !important;
+        font-size: 0.78rem !important;
+    }
+
+    [data-testid="stFileUploaderDropzone"] svg {
+        color: #DCE6FA !important;
+        opacity: 1 !important;
+    }
+
+    /* Browse/Upload button: cover BaseWeb variants used by Community Cloud. */
+    [data-testid="stFileUploader"] button,
+    [data-testid="stFileUploaderDropzone"] button,
+    [data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"],
+    [data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-secondary"] {
         appearance: none !important;
         -webkit-appearance: none !important;
-        background: linear-gradient(
-            90deg,
-            var(--violet) 0%,
-            var(--violet2) 100%
-        ) !important;
-        background-color: var(--violet) !important;
+        background: linear-gradient(90deg, #6C5CE7 0%, #8B7BF0 100%) !important;
+        background-color: #6C5CE7 !important;
         color: #FFFFFF !important;
-        border: 1px solid var(--violet) !important;
+        border: 1px solid #6C5CE7 !important;
         border-radius: 9px !important;
         font-weight: 700 !important;
         min-height: 42px !important;
-        height: 42px !important;
         padding: 0.45rem 1rem !important;
         opacity: 1 !important;
         box-shadow: 0 4px 12px rgba(108, 92, 231, .25) !important;
         text-shadow: none !important;
     }
 
-    section[data-testid="stFileUploader"] button[data-testid="stBaseButton-secondary"]:hover,
-    section[data-testid="stFileUploader"] button[kind="secondary"]:hover,
-    section[data-testid="stFileUploader"] button:hover {
-        background: linear-gradient(
-            90deg,
-            #5B4BE0 0%,
-            #796BE9 100%
-        ) !important;
+    [data-testid="stFileUploader"] button:hover,
+    [data-testid="stFileUploaderDropzone"] button:hover,
+    [data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"]:hover,
+    [data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-secondary"]:hover {
+        background: linear-gradient(90deg, #5B4BE0 0%, #796BE9 100%) !important;
         background-color: #5B4BE0 !important;
         color: #FFFFFF !important;
         border-color: #5B4BE0 !important;
     }
 
-    section[data-testid="stFileUploader"] button[data-testid="stBaseButton-secondary"] *,
-    section[data-testid="stFileUploader"] button[kind="secondary"] *,
-    section[data-testid="stFileUploader"] button * {
+    [data-testid="stFileUploader"] button *,
+    [data-testid="stFileUploaderDropzone"] button *,
+    [data-testid="stFileUploader"] [data-testid="stBaseButton-secondary"] *,
+    [data-testid="stFileUploaderDropzone"] [data-testid="stBaseButton-secondary"] * {
         color: #FFFFFF !important;
-        fill: #FFFFFF !important;
+        opacity: 1 !important;
+    }
+
+    [data-testid="stFileUploader"] button svg,
+    [data-testid="stFileUploaderDropzone"] button svg {
+        color: #FFFFFF !important;
         stroke: #FFFFFF !important;
         opacity: 1 !important;
     }
 
-    section[data-testid="stFileUploader"] button svg {
-        color: #FFFFFF !important;
-        fill: #FFFFFF !important;
-        stroke: #FFFFFF !important;
-    }
-
-    section[data-testid="stFileUploader"] small {
-        color: #AEBED9 !important;
-        font-size: 0.78rem !important;
-    }
-
-    section[data-testid="stFileUploader"] label {
-        color: #DCE6FA !important;
-    }
-
-    section[data-testid="stFileUploader"] [data-testid="stFileUploaderFileName"] {
+    [data-testid="stFileUploaderFileName"] {
         color: #FFFFFF !important;
     }
 
