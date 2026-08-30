@@ -1,25 +1,14 @@
-# ---- Web / API ----
-streamlit>=1.48
-fastapi>=0.116
-uvicorn[standard]>=0.35
-python-multipart>=0.0.20
-pydantic>=2.11
-httpx>=0.28
-
-# ---- Parsing ----
-beautifulsoup4>=4.13
-pypdf>=5.9
-python-docx>=1.2
-
-# ---- Dynamic scoring (no heavy ML deps) ----
-scikit-learn>=1.5
-numpy>=1.26
-
-# ---- Azure AD / Entra ID SSO ----
-# Required only when AUTH_ENABLED=true (the app runs open without them locally).
-msal>=1.31            # UI-side Authorization Code flow
-python-jose[cryptography]>=3.3   # API-side JWT (RS256) validation
-truststore
-
-# ---- Optional LLM (OpenAI-compatible: Groq / OpenAI / Azure OpenAI) ----
-# The app runs fully without these; set LLM_API_KEY to enable LLM generation.
+streamlit==1.48.0
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+python-multipart==0.0.20
+pydantic==2.11.7
+python-dotenv==1.1.1
+httpx==0.28.1
+beautifulsoup4==4.13.4
+pypdf==5.9.0
+python-docx==1.2.0
+langgraph==0.6.2
+langchain-core==0.3.72
+langchain-groq==0.3.6
+mcp==1.12.4
