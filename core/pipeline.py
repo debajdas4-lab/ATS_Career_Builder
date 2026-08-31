@@ -89,6 +89,12 @@ def run_career_guide(
         "optimized_resume": resume_out["optimized_resume"],
         "generation_mode": resume_out["generation_mode"],
         "evidence_validation": resume_out["evidence_validation"],
+        "experience_structure_validation": resume_out.get("experience_structure_validation", {}),
+        "resume_generation_quality": {
+            "source_locked": True,
+            "employer_structure_preserved": resume_out.get("experience_structure_validation", {}).get("pass", True),
+            "numeric_evidence_pass": resume_out.get("evidence_validation", {}).get("pass", True),
+        },
         "linkedin_optimization": build_profile_optimization("LinkedIn", profile, upgraded_analysis),
         "naukri_optimization": build_profile_optimization("Naukri", profile, upgraded_analysis),
         "interview_kit": build_interview_kit(profile, analysis, research),
