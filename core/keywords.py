@@ -73,6 +73,11 @@ _PHRASE_JUNK = {
     "understand", "understands", "throughout", "beyond", "various", "closely",
     "effectively", "quickly", "independently", "clearly", "succinctly", "well",
     "make", "made", "get", "got", "take", "taken", "put", "keep", "kept",
+    "build", "building", "built", "deliver", "delivering", "delivered",
+    "manage", "managing", "managed", "own", "owning", "owned",
+    "direct", "directing", "directed", "partner", "partnering", "partnered",
+    "contribute", "contributing", "contributed", "scale", "scaling", "scaled",
+    "hire", "hiring", "staff", "staffing", "represent", "representing",
 }
 
 # Technical-token shapes: ACRONYMS, CamelCase, tokens with tech punctuation.
