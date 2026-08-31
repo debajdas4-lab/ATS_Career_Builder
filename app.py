@@ -397,6 +397,67 @@ st.markdown(
 
 
     /* ===================================================================== */
+    /* DOWNLOAD BUTTONS                                                      */
+    /* ===================================================================== */
+
+    /* Streamlit st.download_button uses a separate DOM/test id from st.button.
+       Give TXT/DOCX actions the same visual language as the primary actions. */
+    div[data-testid="stDownloadButton"] button,
+    div[data-testid="stDownloadButton"] button[data-testid="stBaseButton-secondary"],
+    div[data-testid="stDownloadButton"] button[kind="secondary"] {
+        appearance: none !important;
+        -webkit-appearance: none !important;
+        width: 100% !important;
+        background: linear-gradient(90deg, #6C5CE7 0%, #8B7BF0 100%) !important;
+        background-color: #6C5CE7 !important;
+        color: #FFFFFF !important;
+        border: 1px solid #6C5CE7 !important;
+        border-radius: 10px !important;
+        font-weight: 700 !important;
+        min-height: 46px !important;
+        padding: 0.55rem 1rem !important;
+        opacity: 1 !important;
+        box-shadow: 0 4px 12px rgba(108, 92, 231, .22) !important;
+        text-shadow: none !important;
+    }
+
+    div[data-testid="stDownloadButton"] button:hover,
+    div[data-testid="stDownloadButton"] button[data-testid="stBaseButton-secondary"]:hover,
+    div[data-testid="stDownloadButton"] button[kind="secondary"]:hover {
+        background: linear-gradient(90deg, #5B4BE0 0%, #796BE9 100%) !important;
+        background-color: #5B4BE0 !important;
+        color: #FFFFFF !important;
+        border-color: #5B4BE0 !important;
+    }
+
+    div[data-testid="stDownloadButton"] button *,
+    div[data-testid="stDownloadButton"] button span,
+    div[data-testid="stDownloadButton"] button p,
+    div[data-testid="stDownloadButton"] button svg {
+        color: #FFFFFF !important;
+        fill: currentColor !important;
+        stroke: currentColor !important;
+        opacity: 1 !important;
+    }
+
+    /* Disabled-state styling only applies when the app actually disables a
+       download button; it should remain readable rather than white-on-white. */
+    div[data-testid="stDownloadButton"] button:disabled {
+        background: #2A3552 !important;
+        background-color: #2A3552 !important;
+        color: #9FB0CC !important;
+        border-color: #3A496B !important;
+        opacity: 1 !important;
+        box-shadow: none !important;
+    }
+
+    div[data-testid="stDownloadButton"] button:disabled * {
+        color: #9FB0CC !important;
+        fill: currentColor !important;
+        stroke: currentColor !important;
+    }
+
+    /* ===================================================================== */
     /* TABS                                                                  */
     /* ===================================================================== */
 
