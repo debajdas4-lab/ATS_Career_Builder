@@ -1582,61 +1582,55 @@ if result:
             or {}
         )
 
-
-        if (
-            isinstance(research, dict)
-            and (
-                research.get("company_profile")
-                or research.get("sources")
-            )
+        if isinstance(research, dict) and (
+            research.get("company_profile")
+            or research.get("sources")
+            or research.get("research_warning")
         ):
 
-            cp = research.get(
-                "company_profile",
-                {},
-            )
+            cp = research.get("company_profile") or {}
 
+            if cp.get("name"):
+                st.subheader(str(cp["name"]))
 
             if cp.get("overview"):
-
-                st.write(
-                    cp["overview"]
-                )
-
+                st.write(cp["overview"])
 
             if research.get("strategy"):
-
-                st.subheader(
-                    "Business & strategic signals"
-                )
-
-
+                st.subheader("Business & strategic signals")
                 for signal in research["strategy"]:
+                    st.markdown(f"- {signal}")
 
-                    st.markdown(
-                        f"- {signal}"
-                    )
+            if research.get("market_signals"):
+                st.subheader("Market signals")
+                for signal in research["market_signals"]:
+                    st.markdown(f"- {signal}")
 
+            if research.get("competitors"):
+                st.subheader("Competitor signals")
+                st.write(", ".join(research["competitors"]))
+
+            if research.get("leadership"):
+                st.subheader("Leadership signals")
+                for item in research["leadership"]:
+                    if isinstance(item, dict):
+                        if item.get("overview"):
+                            st.write(item["overview"])
+                    else:
+                        st.write(item)
 
             if research.get("sources"):
-
-                st.subheader(
-                    "Sources"
-                )
-
-
+                st.subheader("Sources")
                 for src in research["sources"]:
+                    label = html.escape(str(src.get("label", "Source")))
+                    url = html.escape(str(src.get("url", "#")), quote=True)
+                    st.markdown(f"- [{label}]({url})")
 
-                    st.markdown(
-                        f"- "
-                        f"[{src.get('label', 'Source')}]"
-                        f"({src.get('url', '#')})"
-                    )
-
+            if research.get("research_warning"):
+                st.warning(str(research["research_warning"]))
 
         else:
-
             st.info(
-                "Add a company URL or market inputs "
-                "above to enable public-page research."
+                "No detailed research package was returned. Add a company URL, leadership URL, "
+                "or market query and run the Career Guide again."
             )
