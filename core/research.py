@@ -1,6 +1,7 @@
 """Robust public company / market research adapter for ATS Career Builder."""
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 from urllib.parse import urlparse
@@ -8,7 +9,8 @@ from urllib.parse import urlparse
 import httpx
 from bs4 import BeautifulSoup
 
-from .config import TAVILY_API_KEY
+
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "").strip()
 
 
 def clean_source_url(value: str) -> str:
