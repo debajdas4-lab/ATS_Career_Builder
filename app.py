@@ -682,13 +682,74 @@ st.markdown(
     }
 
     /* ===================================================================== */
-    /* STATUS / ALERTS                                                       */
-    /* ===================================================================== */
+    /* STATUS / ALERTS */
 
-    div[data-testid="stStatusWidget"] {
+    /* Defensive override for any native Streamlit status widgets still rendered. */
+    div[data-testid="stStatusWidget"],
+    div[data-testid="stStatusWidget"] > div,
+    div[data-testid="stStatusWidget"] summary,
+    div[data-testid="stStatusWidget"] [data-testid="stMarkdownContainer"] {
         background: #1B2540 !important;
+        color: #EAF0FF !important;
+        border-color: #334466 !important;
+        opacity: 1 !important;
     }
 
+    div[data-testid="stStatusWidget"] svg {
+        color: #8B7BF0 !important;
+        stroke: #8B7BF0 !important;
+        opacity: 1 !important;
+    }
+
+    /* Custom progress panel used by Analyze Job. It avoids Cloud-specific
+       Streamlit/BaseWeb status styling differences entirely. */
+    .cg-progress-panel {
+        background: #1B2540 !important;
+        border: 1px solid #334466 !important;
+        border-radius: 12px !important;
+        padding: 1rem 1.2rem !important;
+        margin: .8rem 0 1.2rem !important;
+        color: #EAF0FF !important;
+        box-shadow: 0 8px 24px rgba(0,0,0,.16) !important;
+    }
+
+    .cg-progress-title {
+        color: #FFFFFF !important;
+        font-weight: 750 !important;
+        font-size: 1rem !important;
+        margin-bottom: .7rem !important;
+    }
+
+    .cg-progress-step {
+        color: #B7C5DF !important;
+        margin: .36rem 0 !important;
+        font-size: .9rem !important;
+        line-height: 1.35 !important;
+    }
+
+    .cg-progress-step.done {
+        color: #67E8A5 !important;
+    }
+
+    .cg-progress-step.active {
+        color: #FFFFFF !important;
+        font-weight: 650 !important;
+    }
+
+    .cg-progress-step.pending {
+        color: #7182A5 !important;
+    }
+
+    .cg-progress-spinner {
+        display: inline-block !important;
+        width: .75rem !important;
+        height: .75rem !important;
+        margin-right: .45rem !important;
+        border: 2px solid #56698F !important;
+        border-top-color: #8B7BF0 !important;
+        border-radius: 50% !important;
+        vertical-align: -.08rem !important;
+    }
 
     .stAlert {
         background: #1B2540 !important;
@@ -1087,6 +1148,35 @@ with st.expander(
 # Run analysis                                                               #
 # --------------------------------------------------------------------------- #
 
+def render_progress_panel(placeholder, active_index: int, state: str = "running", message: str = "Building your career guide..."):
+    steps = [
+        "Inputs received",
+        "Extracting dynamic keywords & candidate profile",
+        "Scoring resume against the job description",
+        "Generating premium resume & application artefacts",
+    ]
+    rows = []
+    for idx, step in enumerate(steps):
+        if state == "complete" or idx < active_index:
+            cls, icon = "done", "✓"
+        elif state == "error" and idx == active_index:
+            cls, icon = "active", "✕"
+        elif idx == active_index:
+            cls, icon = "active", '<span class="cg-progress-spinner"></span>'
+        else:
+            cls, icon = "pending", "○"
+        rows.append(f'<div class="cg-progress-step {cls}">{icon} {html.escape(step)}</div>')
+    placeholder.markdown(
+        '<div class="cg-progress-panel">'
+        f'<div class="cg-progress-title">{html.escape(message)}</div>'
+        + ''.join(rows)
+        + '</div>',
+        unsafe_allow_html=True,
+    )
+
+# Run analysis                                                               #
+# --------------------------------------------------------------------------- #
+
 run_disabled = (
     resume_file is None
     or (
@@ -1112,95 +1202,47 @@ if st.button(
         st.stop()
 
 
-    with st.status(
-        "Building your career guide...",
-        expanded=True,
-    ) as status:
+    progress = st.empty()
+    render_progress_panel(progress, 3, "running", "Building your career guide...")
 
-        status.write("✓ Inputs received")
+    try:
+        resp = httpx.post(
+            f"{API_URL}/v3/career-guide",
+            files={
+                "resume": (
+                    resume_file.name,
+                    resume_file.getvalue(),
+                    resume_file.type or "text/plain",
+                )
+            },
+            data={
+                "job_description": jd_text,
+                "job_url": jd_url,
+                "company_url": company_url,
+                "leadership_url": leadership_url,
+                "market_urls": market_urls,
+                "market_query": market_query,
+                "linkedin_profile": linkedin_profile,
+                "naukri_profile": naukri_profile,
+            },
+            headers=auth_headers(),
+            timeout=httpx.Timeout(240.0, read=None),
+        )
+        resp.raise_for_status()
+        st.session_state["result"] = resp.json()
+        st.session_state["research_fallback_attempted"] = False
+        render_progress_panel(progress, 4, "complete", "Career Guide ready")
 
-        status.write(
-            "◌ Extracting dynamic keywords & candidate profile"
+    except httpx.HTTPStatusError as exc:
+        render_progress_panel(progress, 3, "error", "Career Guide failed")
+        st.error(
+            f"API returned HTTP {exc.response.status_code}: "
+            f"{exc.response.text[:400]}"
         )
 
-        status.write(
-            "◌ Scoring resume against the job description"
-        )
-
-        status.write(
-            "◌ Generating premium resume & application artefacts"
-        )
-
-        try:
-
-            resp = httpx.post(
-
-                f"{API_URL}/v3/career-guide",
-
-                files={
-                    "resume": (
-                        resume_file.name,
-                        resume_file.getvalue(),
-                        resume_file.type or "text/plain",
-                    )
-                },
-
-                data={
-                    "job_description": jd_text,
-                    "job_url": jd_url,
-
-                    "company_url": company_url,
-                    "leadership_url": leadership_url,
-
-                    "market_urls": market_urls,
-                    "market_query": market_query,
-
-                    "linkedin_profile": linkedin_profile,
-                    "naukri_profile": naukri_profile,
-                },
-
-                headers=auth_headers(),
-
-                timeout=httpx.Timeout(
-                    240.0,
-                    read=None,
-                ),
-            )
-
-            resp.raise_for_status()
-
-            st.session_state["result"] = resp.json()
-
-            status.update(
-                label="Career Guide ready",
-                state="complete",
-                expanded=False,
-            )
-
-        except httpx.HTTPStatusError as exc:
-
-            status.update(
-                label="Failed",
-                state="error",
-            )
-
-            st.error(
-                f"API returned HTTP "
-                f"{exc.response.status_code}: "
-                f"{exc.response.text[:400]}"
-            )
-
-        except httpx.RequestError as exc:
-
-            status.update(
-                label="Failed",
-                state="error",
-            )
-
-            st.error(
-                f"Could not connect to the API at "
-                f"{API_URL}: {exc}"
-            )
+    except httpx.RequestError as exc:
+        render_progress_panel(progress, 3, "error", "Could not connect to the API")
+        st.error(f"Could not connect to the API at {API_URL}: {exc}")
 
 
 # --------------------------------------------------------------------------- #
@@ -1209,6 +1251,41 @@ if st.button(
 
 result = st.session_state.get("result")
 
+# Independent V3 research fallback. The primary career-guide response can finish
+# successfully even when public-page scraping fails, so retrieve research again
+# through the dedicated route when a company URL was supplied.
+if result and company_url.strip():
+    existing_research = result.get("research") or {}
+    research_missing = not isinstance(existing_research, dict) or not (
+        existing_research.get("company_profile") or existing_research.get("sources")
+    )
+    if research_missing and not st.session_state.get("research_fallback_attempted", False):
+        st.session_state["research_fallback_attempted"] = True
+        try:
+            research_response = httpx.post(
+                f"{API_URL}/v3/research",
+                data={
+                    "company_url": company_url.strip(),
+                    "leadership_url": leadership_url.strip(),
+                    "market_urls": market_urls,
+                    "market_query": market_query.strip(),
+                },
+                headers=auth_headers(),
+                timeout=45.0,
+            )
+            research_response.raise_for_status()
+            research_payload = research_response.json()
+            recovered_research = research_payload.get("research") or {}
+            if isinstance(recovered_research, dict) and (
+                recovered_research.get("company_profile") or recovered_research.get("sources")
+            ):
+                result["research"] = recovered_research
+                result["sources"] = recovered_research.get("sources", [])
+                st.session_state["result"] = result
+        except Exception as research_exc:
+            result.setdefault("warnings", []).append(
+                f"Research fallback failed: {type(research_exc).__name__}: {research_exc}"
+            )
 
 if result:
 
@@ -1582,55 +1659,66 @@ if result:
             or {}
         )
 
-        if isinstance(research, dict) and (
-            research.get("company_profile")
-            or research.get("sources")
-            or research.get("research_warning")
+
+        if (
+            isinstance(research, dict)
+            and (
+                research.get("company_profile")
+                or research.get("sources")
+            )
         ):
 
-            cp = research.get("company_profile") or {}
+            cp = research.get(
+                "company_profile",
+                {},
+            )
 
-            if cp.get("name"):
-                st.subheader(str(cp["name"]))
 
             if cp.get("overview"):
-                st.write(cp["overview"])
+
+                st.write(
+                    cp["overview"]
+                )
+
 
             if research.get("strategy"):
-                st.subheader("Business & strategic signals")
+
+                st.subheader(
+                    "Business & strategic signals"
+                )
+
+
                 for signal in research["strategy"]:
-                    st.markdown(f"- {signal}")
 
-            if research.get("market_signals"):
-                st.subheader("Market signals")
-                for signal in research["market_signals"]:
-                    st.markdown(f"- {signal}")
+                    st.markdown(
+                        f"- {signal}"
+                    )
 
-            if research.get("competitors"):
-                st.subheader("Competitor signals")
-                st.write(", ".join(research["competitors"]))
-
-            if research.get("leadership"):
-                st.subheader("Leadership signals")
-                for item in research["leadership"]:
-                    if isinstance(item, dict):
-                        if item.get("overview"):
-                            st.write(item["overview"])
-                    else:
-                        st.write(item)
 
             if research.get("sources"):
-                st.subheader("Sources")
-                for src in research["sources"]:
-                    label = html.escape(str(src.get("label", "Source")))
-                    url = html.escape(str(src.get("url", "#")), quote=True)
-                    st.markdown(f"- [{label}]({url})")
 
-            if research.get("research_warning"):
-                st.warning(str(research["research_warning"]))
+                st.subheader(
+                    "Sources"
+                )
+
+
+                for src in research["sources"]:
+
+                    st.markdown(
+                        f"- "
+                        f"[{src.get('label', 'Source')}]"
+                        f"({src.get('url', '#')})"
+                    )
+
 
         else:
-            st.info(
-                "No detailed research package was returned. Add a company URL, leadership URL, "
-                "or market query and run the Career Guide again."
-            )
+            warning = research.get("research_warning") if isinstance(research, dict) else ""
+            if company_url.strip():
+                st.warning(
+                    "A company URL was supplied, but no readable research package was returned. "
+                    + (str(warning) if warning else "The public page may require JavaScript or may block automated access.")
+                )
+                st.caption("The supplied URL was received. Add a leadership URL or market query for additional research signals.")
+            else:
+                st.info("Add a company URL or market inputs above to enable public-page research.")
+                
