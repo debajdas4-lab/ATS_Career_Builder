@@ -24,6 +24,96 @@ from .suggestions import (
 log = logging.getLogger("ats.pipeline")
 
 
+def _targeted_interview_kit(profile: dict, analysis: dict, research: dict, job_description: str, keywords: list[str]) -> dict:
+    """Create JD-specific interview questions from live JD signals and candidate evidence."""
+    matched = list(analysis.get("matched_keywords", []))
+    partial = list(analysis.get("partial_keywords", []))
+    missing = list(analysis.get("missing_keywords", []))
+    signals = [k for k in keywords if k] or matched + partial + missing
+    top = []
+    for k in signals:
+        if k not in top:
+            top.append(k)
+        if len(top) >= 8:
+            break
+
+    achievements = profile.get("achievements", []) if isinstance(profile, dict) else []
+    achievement_texts = []
+    for item in achievements[:4]:
+        if isinstance(item, dict):
+            text = str(item.get("text", "")).strip()
+        else:
+            text = str(item).strip()
+        if text:
+            achievement_texts.append(text)
+
+    company = (research.get("company_profile", {}) or {}).get("name", "the company")
+    strategies = list(research.get("strategy", []) or [])[:3]
+    strategy_text = ", ".join(strategies) if strategies else "the company's stated priorities"
+
+    resume_questions = []
+    for text in achievement_texts[:4]:
+        resume_questions.append(f"Walk me through the most relevant result in this resume and explain how you would apply that experience to the role's requirements around {top[0] if top else 'technical program delivery'}.")
+    if top:
+        resume_questions.append(f"Which example from your background best demonstrates your ability to lead {top[0]}, and what was your personal contribution?")
+
+    technical = []
+    technical_templates = [
+        "How would you structure delivery for a program involving {k}, multiple engineering teams, and competing dependencies?",
+        "What technical risks would you assess first when delivering a platform involving {k}, and how would you communicate those risks to senior leadership?",
+        "How would you validate architecture and engineering trade-offs related to {k} without becoming the team's day-to-day engineer?",
+        "How would you define success metrics for a program centered on {k}?",
+        "How would you handle a cross-team dependency blocking delivery of a capability involving {k}?",
+    ]
+    for k in top[:5]:
+        technical.append(technical_templates[len(technical) % len(technical_templates)].format(k=k))
+
+    leadership_questions = [
+        f"This role requires influencing Product, Engineering and Business leaders on {top[0] if top else 'competing priorities'}. Describe how you would resolve a disagreement without direct authority.",
+        f"How would you run a distributed, multi-time-zone delivery model while keeping {top[1] if len(top) > 1 else 'execution'} predictable?",
+        "Describe how you would establish governance, risk management and executive reporting for a high-visibility technical program.",
+    ]
+
+    company_questions = [
+        f"Why this role at {company}, and which parts of your experience are most transferable to the company's current priorities around {strategy_text}?",
+        f"What would you want to learn about {company}'s engineering/product operating model before committing to a major program roadmap?",
+    ]
+
+    gap_questions = [
+        f"You do not show direct evidence of {k}. How would you address that gap honestly while demonstrating related experience?"
+        for k in missing[:5]
+    ]
+    if not gap_questions:
+        gap_questions = ["Which requirement in this JD would require the most ramp-up from you, and how would you close that gap?"]
+
+    star = []
+    for k in top[:4]:
+        star.append({
+            "capability": k,
+            "prompt": f"Prepare a STAR story showing Situation, Task, Action and quantified Result for a real example involving {k}.",
+        })
+
+    return {
+        "resume_questions": resume_questions[:6] or [f"Which resume example best demonstrates your fit for {top[0] if top else 'this role'}?"],
+        "company_questions": company_questions,
+        "leadership_questions": leadership_questions,
+        "technical_or_domain_questions": technical,
+        "gap_questions": gap_questions,
+        "star_story_blueprints": star,
+    }
+
+
+def _merge_interview_kits(base: dict, targeted: dict) -> dict:
+    """Prefer targeted JD-specific questions while retaining extra generated sections."""
+    base = base if isinstance(base, dict) else {}
+    targeted = targeted if isinstance(targeted, dict) else {}
+    merged = dict(base)
+    for key, value in targeted.items():
+        if value:
+            merged[key] = value
+    return merged
+
+
 def run_career_guide(
     *,
     resume_text: str,
@@ -97,7 +187,10 @@ def run_career_guide(
         },
         "linkedin_optimization": build_profile_optimization("LinkedIn", profile, upgraded_analysis),
         "naukri_optimization": build_profile_optimization("Naukri", profile, upgraded_analysis),
-        "interview_kit": build_interview_kit(profile, analysis, research),
+        "interview_kit": _merge_interview_kits(
+            build_interview_kit(profile, analysis, research),
+            _targeted_interview_kit(profile, analysis, research, job_description, keywords),
+        ),
         "career_roadmap": build_roadmap(profile, analysis),
         "research": research,
         "sources": research.get("sources", []) if isinstance(research, dict) else [],
