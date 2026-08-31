@@ -13,3 +13,4 @@ langchain-core==0.3.72
 langchain-groq==0.3.6
 mcp==1.12.4
 truststore==0.10.4
+scikit-learn
